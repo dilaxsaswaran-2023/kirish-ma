@@ -1,0 +1,15 @@
+com\agrothulir\service\PlatformService$CommandRequest.class
+com\agrothulir\api\ApiExceptionHandler.class
+com\agrothulir\api\ApiController$SchedulePatch.class
+com\agrothulir\api\ApiController.class
+com\agrothulir\AgroThulirApplication.class
+com\agrothulir\config\TenantContext$Role.class
+com\agrothulir\config\TenantContextInterceptor.class
+com\agrothulir\config\WebConfiguration.class
+com\agrothulir\service\PlatformService.class
+com\agrothulir\service\CommandLifecycleWorker.class
+com\agrothulir\api\ApiController$CommandRequest.class
+com\agrothulir\api\ApiException.class
+com\agrothulir\api\ApiController$CorporationRequest.class
+com\agrothulir\config\TenantContext.class
+com\agrothulir\service\PlatformService$CommandReceipt.class
