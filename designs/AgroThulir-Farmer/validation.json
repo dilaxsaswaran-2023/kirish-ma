@@ -1,0 +1,13 @@
+{
+  "screens": 112,
+  "clickLinks": 724,
+  "timedLinks": 8,
+  "issues": [],
+  "unreachable": [],
+  "errors": [],
+  "clickJourneys": 6,
+  "confirmationSimulation": "passed",
+  "nativeFigmaExecution": "pending \u2014 account tool limit",
+  "apiDeclarationCheck": "passed with bundled Figma API declarations",
+  "previewVisualReview": "home, manual control, connection selection, connected path, activation order, schedule conflict"
+}
