@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "AgroThulir",
+    "slug": "agrothulir",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "agrothulir",
+    "description": "Connected care. Growing possibilities.",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.agrothulir.mobile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#F6F7EF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}
