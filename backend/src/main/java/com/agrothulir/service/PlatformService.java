@@ -2,12 +2,16 @@ package com.agrothulir.service;
 
 import com.agrothulir.api.ApiException;
 import com.agrothulir.config.TenantContext;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -15,7 +19,8 @@ import java.util.*;
 @Service
 public class PlatformService {
     private final JdbcTemplate jdbc;
-    public PlatformService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final ObjectMapper json;
+    public PlatformService(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
 
     public Map<String, Object> me(TenantContext context) {
         Map<String, Object> user = one("SELECT id, display_name, account_status FROM users WHERE id = ?", context.userId());
@@ -25,7 +30,7 @@ public class PlatformService {
     }
 
     public List<Map<String, Object>> workspaces(TenantContext context) {
-        return maps("SELECT c.id, c.workspace_code, c.name, c.status, c.default_timezone FROM corporations c JOIN corporation_memberships m ON m.corporation_id=c.id WHERE m.user_id=? AND m.status='ACTIVE'", context.userId());
+        return maps("SELECT c.id, c.workspace_code, c.name, c.status, c.default_timezone, m.corporate_role FROM corporations c JOIN corporation_memberships m ON m.corporation_id=c.id WHERE m.user_id=? AND m.status='ACTIVE' AND c.status='ACTIVE' ORDER BY c.name,c.id", context.userId());
     }
 
     public List<Map<String, Object>> corporations(TenantContext context) {
@@ -36,7 +41,7 @@ public class PlatformService {
     @Transactional
     public Map<String, Object> createCorporation(TenantContext context, String name, String workspaceCode, String timezone) {
         requirePlatform(context);
-        String id = "corp-" + UUID.randomUUID();
+        String id = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO corporations(id,workspace_code,name,status,default_timezone) VALUES (?,?,?,'ACTIVE',?)", id, workspaceCode.toUpperCase(Locale.ROOT), name, timezone);
         audit(context, "CORPORATION_CREATED", id, name);
         return one("SELECT id,workspace_code,name,status,default_timezone FROM corporations WHERE id=?", id);
@@ -44,13 +49,15 @@ public class PlatformService {
 
     public Map<String, Object> platformOverview(TenantContext context) {
         requirePlatform(context);
+        long critical = count("SELECT COUNT(*) FROM alerts WHERE severity='CRITICAL' AND resolved_at IS NULL");
+        long backlog = count("SELECT COUNT(*) FROM outbox_events WHERE dispatched_at IS NULL");
         return Map.of(
             "corporations", count("SELECT COUNT(*) FROM corporations"),
             "sites", count("SELECT COUNT(*) FROM sites WHERE archived_at IS NULL"),
             "devicesOnline", count("SELECT COUNT(*) FROM devices WHERE status='ONLINE'"),
-            "openCriticalAlerts", count("SELECT COUNT(*) FROM alerts WHERE severity='CRITICAL' AND resolved_at IS NULL"),
-            "outboxBacklog", count("SELECT COUNT(*) FROM outbox_events WHERE dispatched_at IS NULL"),
-            "health", "HEALTHY"
+            "openCriticalAlerts", critical,
+            "outboxBacklog", backlog,
+            "health", critical > 0 || backlog > 0 ? "ATTENTION" : "HEALTHY"
         );
     }
 
@@ -83,7 +90,10 @@ public class PlatformService {
 
     public Map<String, Object> capabilities(TenantContext context, String deviceId) {
         Map<String, Object> device = device(context, deviceId);
-        return Map.of("deviceId", deviceId, "model", device.get("model"), "version", "1.0", "actions", List.of("START", "SAFE_STOP"), "channels", List.of("DO1", "DI1", "DO2", "DI2", "AI1", "AI2"));
+        List<Map<String, Object>> components = components(context, deviceId);
+        return Map.of("deviceId", deviceId, "model", device.get("model"), "version", Objects.toString(device.get("firmware"), "unknown"),
+            "actions", components.stream().anyMatch(c -> "PUMP".equals(c.get("kind"))) ? List.of("START", "SAFE_STOP") : List.of(),
+            "channels", components.stream().map(c -> Objects.toString(c.get("hardware_channel"))).toList());
     }
 
     public List<Map<String, Object>> components(TenantContext context, String deviceId) {
@@ -92,17 +102,83 @@ public class PlatformService {
         return maps("SELECT id,device_id,kind,name,hardware_channel,reported_state,feedback_quality,latest_value,state_version,measured_at FROM components WHERE corporation_id=? AND device_id=? ORDER BY name", context.corporationId(), deviceId);
     }
 
+    public Map<String, Object> diagnostics(TenantContext context, String deviceId) {
+        Map<String, Object> device = device(context, deviceId);
+        String seen = Objects.toString(device.get("last_seen_at"), "");
+        long lag = seen.isEmpty() ? -1 : Math.max(0, ChronoUnit.SECONDS.between(Instant.parse(seen), Instant.now()));
+        return Map.of("deviceId", deviceId, "status", device.get("status"), "mqtt", "UNKNOWN",
+            "telemetryLagSeconds", lag, "configuration", "UNKNOWN");
+    }
+
+    public Map<String, Object> topology(TenantContext context, String siteId) {
+        Map<String, Object> site = site(context, siteId);
+        List<Map<String, Object>> componentRows = maps("SELECT id FROM components WHERE site_id=? AND corporation_id=? ORDER BY id", siteId, context.corporationId());
+        @SuppressWarnings("unchecked") List<Map<String, Object>> zoneRows = (List<Map<String, Object>>) site.get("zones");
+        List<String> nodes = new ArrayList<>();
+        zoneRows.forEach(zone -> nodes.add(Objects.toString(zone.get("id"))));
+        componentRows.forEach(component -> nodes.add(Objects.toString(component.get("id"))));
+        return Map.of("siteId", siteId, "status", "UNCONFIGURED", "nodes", nodes, "connections", List.of());
+    }
+
+    public String pumpForFlow(TenantContext context, String flowId) {
+        Map<String, Object> flow = one("SELECT site_id,status FROM flows WHERE id=? AND corporation_id=?", flowId, context.corporationId());
+        requireSiteAccess(context, Objects.toString(flow.get("site_id")));
+        if (!"PUBLISHED".equals(flow.get("status")))
+            throw new ApiException(HttpStatus.CONFLICT, "FLOW_NOT_PUBLISHED", "Publish this flow before running it.");
+        List<String> pumps = jdbc.queryForList("SELECT id FROM components WHERE site_id=? AND corporation_id=? AND kind='PUMP' ORDER BY id",
+            String.class, flow.get("site_id"), context.corporationId());
+        if (pumps.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "PUMP_NOT_FOUND", "This flow has no pump in its site.");
+        return pumps.get(0);
+    }
+
+    public String pumpForRun(TenantContext context, String runId) {
+        Map<String, Object> run = run(context, runId);
+        requireSiteAccess(context, Objects.toString(run.get("site_id")));
+        List<String> pumps = jdbc.queryForList("SELECT c.component_id FROM commands c WHERE c.run_id=? AND c.corporation_id=? ORDER BY c.created_at",
+            String.class, runId, context.corporationId());
+        if (pumps.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "PUMP_NOT_FOUND", "No component is associated with this run.");
+        return pumps.get(0);
+    }
+
+    public Map<String, Object> schedulePreview(TenantContext context, String scheduleId) {
+        Map<String, Object> row = one("SELECT site_id,timezone,next_due_at FROM schedules WHERE id=? AND corporation_id=?", scheduleId, context.corporationId());
+        requireSiteAccess(context, Objects.toString(row.get("site_id")));
+        Object due = row.get("next_due_at");
+        return Map.of("scheduleId", scheduleId, "timezone", row.get("timezone"), "dstPolicy", "NOT_CONFIGURED",
+            "occurrences", due == null ? List.of() : List.of(due));
+    }
+
     public List<Map<String, Object>> flows(TenantContext context) {
         return maps("SELECT f.id,f.site_id,f.name,f.status,f.published_version,f.config_hash FROM flows f WHERE f.corporation_id=? AND (EXISTS(SELECT 1 FROM site_grants g WHERE g.site_id=f.site_id AND g.user_id=?) OR ? IN ('CORPORATE_ADMIN','SUPER_ADMIN')) ORDER BY f.name", context.corporationId(), context.userId(), context.role().name());
+    }
+
+    public Map<String, Object> validateFlow(TenantContext context, String flowId) {
+        Map<String, Object> flow = one("SELECT site_id,graph,shutdown_policy FROM flows WHERE id=? AND corporation_id=?", flowId, context.corporationId());
+        requireSiteAccess(context, Objects.toString(flow.get("site_id")));
+        List<String> checks = new ArrayList<>();
+        try {
+            JsonNode graph = json.readTree(Objects.toString(flow.get("graph"), "{}"));
+            JsonNode policy = json.readTree(Objects.toString(flow.get("shutdown_policy"), "{}"));
+            JsonNode nodes = graph.path("nodes");
+            if ((nodes.isArray() && !nodes.isEmpty()) || (nodes.isNumber() && nodes.asInt() > 0)) checks.add("HAS_NODES");
+            if (graph.path("bounded").asBoolean(false)) checks.add("BOUNDED_EXECUTION");
+            if (policy.path("safeStop").asBoolean(false)) checks.add("SAFE_STOP");
+        } catch (Exception ex) {
+            return Map.of("flowId", flowId, "valid", false, "checks", List.of("INVALID_GRAPH_JSON"));
+        }
+        return Map.of("flowId", flowId, "valid", checks.containsAll(List.of("HAS_NODES", "BOUNDED_EXECUTION", "SAFE_STOP")), "checks", checks);
     }
 
     @Transactional
     public Map<String, Object> publishFlow(TenantContext context, String flowId) {
         requireManage(context);
-        Map<String, Object> flow = one("SELECT id,site_id,status,published_version FROM flows WHERE id=? AND corporation_id=?", flowId, context.corporationId());
+        Map<String, Object> flow = one("SELECT id,site_id,status,published_version,graph,shutdown_policy FROM flows WHERE id=? AND corporation_id=?", flowId, context.corporationId());
         requireSiteAccess(context, Objects.toString(flow.get("site_id")));
+        if (!Boolean.TRUE.equals(validateFlow(context, flowId).get("valid")))
+            throw new ApiException(HttpStatus.CONFLICT, "FLOW_INVALID", "The flow needs nodes, bounded execution, and safe stop before publishing.");
         int version = flow.get("published_version") == null ? 1 : ((Number) flow.get("published_version")).intValue() + 1;
-        jdbc.update("UPDATE flows SET status='PUBLISHED',published_version=?,config_hash=? WHERE id=? AND corporation_id=?", version, "sha256:published-v" + version, flowId, context.corporationId());
+        jdbc.update("UPDATE flows SET status='PUBLISHED',published_version=?,config_hash=? WHERE id=? AND corporation_id=?", version,
+            hash(Objects.toString(flow.get("graph")) + Objects.toString(flow.get("shutdown_policy"))), flowId, context.corporationId());
         audit(context, "FLOW_PUBLISHED", flowId, "Published immutable version " + version);
         return Map.of("flowId", flowId, "version", version, "status", "PUBLISHED", "scheduleMigrationRequired", true);
     }
@@ -114,6 +190,8 @@ public class PlatformService {
     @Transactional
     public Map<String, Object> pauseSchedule(TenantContext context, String scheduleId, boolean enabled) {
         requireManage(context);
+        Map<String, Object> schedule = one("SELECT site_id FROM schedules WHERE id=? AND corporation_id=?", scheduleId, context.corporationId());
+        requireSiteAccess(context, Objects.toString(schedule.get("site_id")));
         int updated = jdbc.update("UPDATE schedules SET enabled=? WHERE id=? AND corporation_id=?", enabled, scheduleId, context.corporationId());
         if (updated == 0) notFound();
         audit(context, enabled ? "SCHEDULE_ENABLED" : "SCHEDULE_PAUSED", scheduleId, "Future occurrences only");
@@ -126,6 +204,8 @@ public class PlatformService {
 
     @Transactional
     public Map<String, Object> acknowledgeAlert(TenantContext context, String alertId) {
+        Map<String, Object> alert = one("SELECT site_id FROM alerts WHERE id=? AND corporation_id=?", alertId, context.corporationId());
+        requireSiteAccess(context, Objects.toString(alert.get("site_id")));
         int updated = jdbc.update("UPDATE alerts SET acknowledged_by=?,acknowledged_at=CURRENT_TIMESTAMP WHERE id=? AND corporation_id=? AND acknowledged_at IS NULL", context.userId(), alertId, context.corporationId());
         if (updated == 0 && count("SELECT COUNT(*) FROM alerts WHERE id=? AND corporation_id=?", alertId, context.corporationId()) == 0) notFound();
         audit(context, "ALERT_ACKNOWLEDGED", alertId, "Acknowledged; resolution remains independent");
@@ -142,28 +222,33 @@ public class PlatformService {
         requireSiteAccess(context, Objects.toString(component.get("site_id")));
         String action = request.action().toUpperCase(Locale.ROOT);
         if (!Set.of("START", "SAFE_STOP").contains(action)) throw new ApiException(HttpStatus.BAD_REQUEST, "UNSUPPORTED_ACTION", "Only START and SAFE_STOP are supported for this component.");
+        String valveId = null;
         if (action.equals("START")) {
             if (!"ACTIVE".equals(component.get("corporation_status"))) throw new ApiException(HttpStatus.CONFLICT, "CORPORATION_SUSPENDED", "New remote starts are disabled for this workspace.");
             if (!"ONLINE".equals(component.get("device_status"))) throw new ApiException(HttpStatus.CONFLICT, "DEVICE_OFFLINE", "The controller is offline. No start was queued for reconnect.");
             if (!"PUMP".equals(component.get("kind"))) throw new ApiException(HttpStatus.CONFLICT, "CAPABILITY_MISMATCH", "This component does not support protected start.");
-            long held = count("SELECT COUNT(*) FROM resource_reservations WHERE resource_id IN (?,?) AND expires_at>CURRENT_TIMESTAMP", componentId, "valve-a");
+            List<String> valves = jdbc.queryForList("SELECT id FROM components WHERE corporation_id=? AND site_id=? AND device_id=? AND kind='VALVE' ORDER BY id",
+                String.class, context.corporationId(), component.get("site_id"), component.get("device_id"));
+            if (valves.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "CAPABILITY_MISMATCH", "This pump has no protected valve.");
+            valveId = valves.get(0);
+            long held = count("SELECT COUNT(*) FROM resource_reservations WHERE resource_id IN (?,?) AND expires_at>CURRENT_TIMESTAMP", componentId, valveId);
             if (held > 0) throw new ApiException(HttpStatus.CONFLICT, "RESOURCE_BUSY", "Required pump or valve resources are owned by another run.");
-            long confirmedValve = count("SELECT COUNT(*) FROM components WHERE id='valve-a' AND corporation_id=? AND feedback_quality='CONFIRMED'", context.corporationId());
+            long confirmedValve = count("SELECT COUNT(*) FROM components WHERE id=? AND corporation_id=? AND feedback_quality='CONFIRMED'", valveId, context.corporationId());
             if (confirmedValve == 0) throw new ApiException(HttpStatus.CONFLICT, "STALE_STATE", "Fresh valve feedback is required before this protected start.");
         }
 
         Instant now = Instant.now();
-        String runId = "run-" + UUID.randomUUID();
-        String commandId = "cmd-" + UUID.randomUUID();
+        String runId = UUID.randomUUID().toString();
+        String commandId = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO runs(id,corporation_id,site_id,initiator_id,source,state,started_at) VALUES (?,?,?,?,?,'ACCEPTED',?)", runId, context.corporationId(), component.get("site_id"), context.userId(), "MANUAL", Timestamp.from(now));
         jdbc.update("INSERT INTO commands(id,corporation_id,run_id,device_id,component_id,action,state,idempotency_key,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,'ACCEPTED',?,?,?,?)", commandId, context.corporationId(), runId, component.get("device_id"), componentId, action, idempotencyKey, Timestamp.from(now.plus(15, ChronoUnit.SECONDS)), Timestamp.from(now), Timestamp.from(now));
         if (action.equals("START")) {
             Instant lockExpiry = now.plus(request.durationSeconds() + 300L, ChronoUnit.SECONDS);
             jdbc.update("INSERT INTO resource_reservations(resource_id,owner_run,fencing_generation,expires_at) VALUES (?,?,?,?)", componentId, runId, now.toEpochMilli(), Timestamp.from(lockExpiry));
-            jdbc.update("INSERT INTO resource_reservations(resource_id,owner_run,fencing_generation,expires_at) VALUES ('valve-a',?,?,?)", runId, now.toEpochMilli(), Timestamp.from(lockExpiry));
+            jdbc.update("INSERT INTO resource_reservations(resource_id,owner_run,fencing_generation,expires_at) VALUES (?,?,?,?)", valveId, runId, now.toEpochMilli(), Timestamp.from(lockExpiry));
         }
         String payload = "{\"commandId\":\"" + commandId + "\",\"runId\":\"" + runId + "\",\"action\":\"" + action + "\",\"expiresAt\":\"" + now.plusSeconds(15) + "\"}";
-        jdbc.update("INSERT INTO outbox_events(id,aggregate_id,event_type,payload,created_at) VALUES (?,?,?,?,?)", "evt-" + UUID.randomUUID(), commandId, "DEVICE_COMMAND_REQUESTED", payload, Timestamp.from(now));
+        jdbc.update("INSERT INTO outbox_events(id,aggregate_id,event_type,payload,created_at) VALUES (?,?,?,?,?)", UUID.randomUUID().toString(), commandId, "DEVICE_COMMAND_REQUESTED", payload, Timestamp.from(now));
         audit(context, "COMMAND_ACCEPTED", commandId, action + " for " + componentId);
         return new CommandReceipt(commandId, runId, "ACCEPTED", "/v1/commands/" + commandId);
     }
@@ -190,14 +275,18 @@ public class PlatformService {
     }
     private void requireManage(TenantContext context) { if (!context.canManage()) throw new ApiException(HttpStatus.FORBIDDEN, "MANAGEMENT_FORBIDDEN", "This role cannot change configuration."); }
     private void requirePlatform(TenantContext context) { if (!context.isPlatformAdmin()) throw new ApiException(HttpStatus.FORBIDDEN, "PLATFORM_ADMIN_REQUIRED", "Platform administration access is required."); }
-    private void audit(TenantContext c, String operation, String target, String summary) { jdbc.update("INSERT INTO audit_events(id,actor_id,corporation_id,operation,target,summary,occurred_at) VALUES (?,?,?,?,?,?,?)", "audit-" + UUID.randomUUID(), c.userId(), c.corporationId(), operation, target, summary, Timestamp.from(Instant.now())); }
+    private void audit(TenantContext c, String operation, String target, String summary) { jdbc.update("INSERT INTO audit_events(id,actor_id,corporation_id,operation,target,summary,occurred_at) VALUES (?,?,?,?,?,?,?)", UUID.randomUUID().toString(), c.userId(), c.corporationId(), operation, target, summary, Timestamp.from(Instant.now())); }
     private CommandReceipt receipt(Map<String, Object> row) { return new CommandReceipt(Objects.toString(row.get("id")), Objects.toString(row.get("run_id")), Objects.toString(row.get("state")), "/v1/commands/" + row.get("id")); }
     private long count(String sql, Object... args) { Long value = jdbc.queryForObject(sql, Long.class, args); return value == null ? 0 : value; }
+    private String hash(String value) {
+        try { return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
+        catch (Exception ex) { throw new IllegalStateException(ex); }
+    }
     private Map<String, Object> one(String sql, Object... args) { List<Map<String, Object>> rows = maps(sql, args); if (rows.isEmpty()) notFound(); return rows.get(0); }
     private List<Map<String, Object>> maps(String sql, Object... args) {
         return jdbc.query(sql, (rs, rowNum) -> {
             var meta = rs.getMetaData(); Map<String, Object> row = new LinkedHashMap<>();
-            for (int i = 1; i <= meta.getColumnCount(); i++) { Object value = rs.getObject(i); if (value instanceof Timestamp t) value = t.toInstant().toString(); row.put(meta.getColumnLabel(i).toLowerCase(Locale.ROOT), value); }
+            for (int i = 1; i <= meta.getColumnCount(); i++) { Object value = rs.getObject(i); if (value instanceof Timestamp t) value = t.toInstant().toString(); if (value instanceof UUID uuid) value = uuid.toString(); row.put(meta.getColumnLabel(i).toLowerCase(Locale.ROOT), value); }
             return row;
         }, args);
     }

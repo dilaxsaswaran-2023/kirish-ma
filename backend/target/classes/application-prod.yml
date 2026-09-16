@@ -1,10 +1,8 @@
 spring:
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/agrothulir}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/agrothulir?stringtype=unspecified}
     username: ${DATABASE_USER:agrothulir_app}
     password: ${DATABASE_PASSWORD}
   h2:
     console:
       enabled: false
-agrothulir:
-  demo-auth: false

@@ -2,15 +2,14 @@ import React, {createContext, useCallback, useContext, useEffect, useMemo, useSt
 import {
   ApiError,
   DEFAULT_BASE_URL,
-  DEMO_IDENTITY,
   getBaseUrl,
   setBaseUrl,
-  setIdentity,
+  setToken,
 } from '../api/client';
-import {getDevices, getMe, getSites, getWorkspaces} from '../api/endpoints';
-import type {Me, Role, Site, Workspace} from '../api/types';
+import {getMe, getSites, getWorkspaces, login, logout, selectWorkspace} from '../api/endpoints';
+import type {Me, Site, Workspace} from '../api/types';
 
-type SignInInput = {userId: string; corporationId: string; role: Role; baseUrl: string};
+type SignInInput = {email: string; password: string};
 
 type SessionValue = {
   signedIn: boolean;
@@ -26,6 +25,7 @@ type SessionValue = {
   signIn: (input: SignInInput) => Promise<void>;
   signOut: () => void;
   selectSite: (siteId: string) => void;
+  selectCorporation: (corporationId: string) => Promise<void>;
   refreshSites: () => Promise<void>;
   /** True when the backend's role allows equipment commands (not VIEWER). */
   canControl: boolean;
@@ -33,37 +33,6 @@ type SessionValue = {
 };
 
 const SessionContext = createContext<SessionValue | undefined>(undefined);
-
-/**
- * Open in a site the farmer can actually do something in: the first one with a
- * controller that has a motor or valve, preferring one that is online. Falls
- * back to the first site the service listed if that cannot be determined.
- */
-async function pickOpeningSite(sites: Site[]): Promise<string | undefined> {
-  if (sites.length <= 1) {
-    return sites[0]?.id;
-  }
-  try {
-    const perSite = await Promise.all(
-      sites.map(async site => {
-        const devices = await getDevices(site.id);
-        const actuated = devices.filter(device => (device.actuator_count ?? 0) > 0);
-        return {
-          id: site.id,
-          hasEquipment: actuated.length > 0,
-          hasOnlineEquipment: actuated.some(device => device.status === 'ONLINE'),
-        };
-      }),
-    );
-    return (
-      perSite.find(entry => entry.hasOnlineEquipment)?.id ??
-      perSite.find(entry => entry.hasEquipment)?.id ??
-      sites[0].id
-    );
-  } catch {
-    return sites[0].id;
-  }
-}
 
 export function SessionProvider({children}: {children: React.ReactNode}) {
   const [me, setMe] = useState<Me | undefined>(undefined);
@@ -81,25 +50,25 @@ export function SessionProvider({children}: {children: React.ReactNode}) {
   const signIn = useCallback(async (input: SignInInput) => {
     setConnecting(true);
     setError(undefined);
-    setBaseUrl(input.baseUrl);
-    setBaseUrlState(input.baseUrl.replace(/\/+$/, ''));
-    setIdentity({userId: input.userId, corporationId: input.corporationId, role: input.role});
+    setBaseUrl(DEFAULT_BASE_URL);
+    setBaseUrlState(DEFAULT_BASE_URL);
     try {
+      const session = await login(input.email, input.password);
+      setToken(session.token);
       // A real round-trip proves the phone can reach the service before the
       // farmer is shown any equipment state.
       const [profile, spaces, siteRows] = await Promise.all([getMe(), getWorkspaces(), getSites()]);
       setMe(profile);
       setWorkspaces(spaces);
       setSites(siteRows);
-      const opening = await pickOpeningSite(siteRows);
-      setActiveSiteId(current => current ?? opening);
+      setActiveSiteId(siteRows[0]?.id);
     } catch (cause) {
       const failure =
         cause instanceof ApiError
           ? cause
           : new ApiError(0, 'UNEXPECTED_ERROR', 'Sign-in could not be completed.');
       setError(failure);
-      setIdentity(DEMO_IDENTITY);
+      setToken(undefined);
       throw failure;
     } finally {
       setConnecting(false);
@@ -112,13 +81,32 @@ export function SessionProvider({children}: {children: React.ReactNode}) {
     setSites([]);
     setActiveSiteId(undefined);
     setError(undefined);
-    setIdentity(DEMO_IDENTITY);
+    logout().catch(() => undefined);
+    setToken(undefined);
   }, []);
 
   const refreshSites = useCallback(async () => {
     const rows = await getSites();
     setSites(rows);
     setActiveSiteId(current => (current && rows.some(s => s.id === current) ? current : rows[0]?.id));
+  }, []);
+
+  const selectCorporation = useCallback(async (corporationId: string) => {
+    setConnecting(true);
+    setError(undefined);
+    try {
+      await selectWorkspace(corporationId);
+      const [profile, rows] = await Promise.all([getMe(), getSites()]);
+      setMe(profile);
+      setSites(rows);
+      setActiveSiteId(rows[0]?.id);
+    } catch (cause) {
+      const failure = cause instanceof ApiError ? cause : new ApiError(0, 'UNEXPECTED_ERROR', 'Could not change corporation.');
+      setError(failure);
+      throw failure;
+    } finally {
+      setConnecting(false);
+    }
   }, []);
 
   const value = useMemo<SessionValue>(() => {
@@ -136,11 +124,12 @@ export function SessionProvider({children}: {children: React.ReactNode}) {
       signIn,
       signOut,
       selectSite: setActiveSiteId,
+      selectCorporation,
       refreshSites,
       canControl: role !== undefined && role !== 'VIEWER',
       canManage: role === 'SUPER_ADMIN' || role === 'CORPORATE_ADMIN' || role === 'SITE_MANAGER',
     };
-  }, [me, workspaces, sites, activeSiteId, baseUrl, connecting, error, signIn, signOut, refreshSites]);
+  }, [me, workspaces, sites, activeSiteId, baseUrl, connecting, error, signIn, signOut, refreshSites, selectCorporation]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

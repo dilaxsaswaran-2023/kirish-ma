@@ -1,25 +1,9 @@
-import {Platform} from 'react-native';
+import {BASE_URL} from '@env';
 
-/**
- * Thin transport for the AgroThulir API. The backend authenticates demo calls
- * with X-User-Id / X-Corporation-Id / X-Role headers (TenantContextInterceptor),
- * so identity lives here and is swapped by the session store at sign-in.
- */
-
-/** Android emulators reach the host machine's localhost through 10.0.2.2. */
-export const DEFAULT_BASE_URL =
-  Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://127.0.0.1:8080';
-
-export type Identity = {userId: string; corporationId: string; role: string};
-
-export const DEMO_IDENTITY: Identity = {
-  userId: 'user-anjali',
-  corporationId: 'corp-greenroot',
-  role: 'OPERATOR',
-};
+export const DEFAULT_BASE_URL = BASE_URL;
 
 let baseUrl = DEFAULT_BASE_URL;
-let identity: Identity = DEMO_IDENTITY;
+let token: string | undefined;
 
 export function getBaseUrl() {
   return baseUrl;
@@ -29,12 +13,12 @@ export function setBaseUrl(url: string) {
   baseUrl = url.replace(/\/+$/, '');
 }
 
-export function getIdentity() {
-  return identity;
+export function getToken() {
+  return token;
 }
 
-export function setIdentity(next: Identity) {
-  identity = next;
+export function setToken(next: string | undefined) {
+  token = next;
 }
 
 /** Error carrying the backend's machine-readable code (ApiExceptionHandler). */
@@ -92,9 +76,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        'X-User-Id': identity.userId,
-        'X-Corporation-Id': identity.corporationId,
-        'X-Role': identity.role,
+        ...(token ? {Authorization: `Bearer ${token}`} : {}),
         ...options.headers,
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),

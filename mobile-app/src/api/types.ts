@@ -20,7 +20,22 @@ export type Workspace = {
   name: string;
   status: string;
   default_timezone: string;
+  corporate_role?: string;
 };
+
+export type OperationalFlow = {id: string; site_id: string; name: string; status: string; published_version: number; step_count: number};
+export type OperationalStep = {id: string; step_index: number; component_id: string; component_name: string; kind: string;
+  on_action: string; off_action: string; reported_state: string | null; feedback_quality: string;
+  device_id: string; device_name: string; device_status: string};
+export type OperationalFlowDetail = OperationalFlow & {corporation_id: string; steps: OperationalStep[];
+  online: boolean; currentState: 'ON' | 'OFF' | 'UNKNOWN'; latestRun: OperationalHistory | null};
+export type OperationalRunStep = {id: string; step_index: number; component_id: string; component_name: string;
+  action: string; expected_state: string; state: string; command_id: string | null; created_at: string; confirmed_at: string | null};
+export type OperationalRun = {id: string; site_id: string; flow_id: string; flow_name: string; requested_action: 'ON' | 'OFF';
+  state: string; started_at: string; ended_at: string | null; steps: OperationalRunStep[]};
+export type OperationalHistory = Omit<OperationalRun, 'steps'>;
+export type SensorReading = {id: string; component_id: string; component_name: string; value: string; unit: string | null;
+  quality: string; measured_at: string};
 
 export type SiteHealth = 'HEALTHY' | 'WARNING' | 'OFFLINE' | string;
 

@@ -15,9 +15,11 @@ services:
   api:
     build: .
     environment:
-      DATABASE_URL: jdbc:postgresql://postgres:5432/agrothulir
+      SPRING_PROFILES_ACTIVE: prod
+      DATABASE_URL: jdbc:postgresql://postgres:5432/agrothulir?stringtype=unspecified
       DATABASE_USER: agrothulir_app
       DATABASE_PASSWORD: local-dev-only
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
     ports: ["8080:8080"]
     depends_on:
       postgres:

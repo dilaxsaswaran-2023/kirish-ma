@@ -1,0 +1,4 @@
+.workspace-card{width:calc(100% - 10px);text-align:left;cursor:pointer}
+.workspace-menu{border:1px solid #e1ebe4;border-radius:10px;background:#fff;margin:-18px 5px 20px;padding:6px;max-height:220px;overflow:auto;box-shadow:0 8px 20px #1f3d2a12}
+.workspace-menu button{display:block;width:100%;border:0;background:transparent;color:#647a69;text-align:left;padding:9px 10px;border-radius:7px;font-size:11px;font-weight:600}
+.workspace-menu button:hover,.workspace-menu button.selected{background:#e9f5ec;color:#1c7546}

@@ -1,0 +1,4 @@
+data/
+verify-test.log
+target/
+application-local.yml

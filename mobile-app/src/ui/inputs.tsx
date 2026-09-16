@@ -12,6 +12,7 @@ export function InputField({
   autoCapitalize = 'none',
   keyboardType,
   hint,
+  secureTextEntry = false,
 }: {
   label: string;
   value: string;
@@ -21,6 +22,7 @@ export function InputField({
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   keyboardType?: 'default' | 'url' | 'numeric';
   hint?: string;
+  secureTextEntry?: boolean;
 }) {
   return (
     <View style={styles.field}>
@@ -35,6 +37,7 @@ export function InputField({
           autoCapitalize={autoCapitalize}
           autoCorrect={false}
           keyboardType={keyboardType}
+          secureTextEntry={secureTextEntry}
           accessibilityLabel={label}
         />
         <Icon name={icon} color={colors.green} size={20} />

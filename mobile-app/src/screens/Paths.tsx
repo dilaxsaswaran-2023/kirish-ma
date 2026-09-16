@@ -294,8 +294,8 @@ export function TopologyScreen() {
           />
           <Note
             icon="arrow"
-            label="Arrows show one-way water flow"
-            sub="Highlighted equipment is open or running right now."
+            label={resource.data.topology.connections.length > 0 ? 'Arrows show one-way water flow' : 'Water path not configured'}
+            sub={resource.data.topology.connections.length > 0 ? 'Highlighted equipment is open or running right now.' : 'Equipment is listed from the database; no physical connections have been recorded.'}
           />
           {resource.data.equipment.controllers.flatMap(device =>
             valvesOf(device.components).map(valve => (

@@ -1,14 +1,7 @@
-# AgroThulir
+# Kirish / AgroThulir
 
-Implementation based on `AgroThulir-Product-and-Backend-Design.md`.
+- `backend/` — Spring Boot API with persisted data, startup seeding, and password-backed bearer sessions.
+- `mobile-app/` — React Native device-control app for assigned sites and operational flow ON/OFF requests.
+- `web-app/` — React admin portal for corporations, site equipment, ordered operational flows, schedules, alerts, and audit activity.
 
-- `mobile/` — Expo React Native app with operator, site, equipment, flow, schedule, alert, corporate admin, and platform admin journeys.
-- `backend/` — Spring Boot 3.5 modular API with PostgreSQL/Flyway production configuration, tenant/site authorization, command idempotency, resource fencing, outbox dispatch, schedules, alerts, and audit events.
-
-## Start locally
-
-1. Run `mvn spring-boot:run` in `backend` (Java 21).
-2. With Node.js 22.13+, run `npm start` in `mobile`.
-3. Open Expo on Android, iOS, or web. Set `EXPO_PUBLIC_API_URL` when the backend is not reachable at the Android-emulator default `http://10.0.2.2:8080`.
-
-The demo login accepts the prefilled credentials. The mobile app can be explored without the backend; command requests use the API when it is reachable.
+Both clients read their hosted backend URL from `.env` and currently point to the ngrok tunnel. Change those URLs if the tunnel changes. The backend persists normal runs in PostgreSQL; H2 is used only in tests. Set `CORS_ALLOWED_ORIGINS` for the web app origin. See each app's README for local commands and seeded accounts.
