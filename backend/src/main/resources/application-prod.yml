@@ -6,3 +6,15 @@ spring:
   h2:
     console:
       enabled: false
+server:
+  forward-headers-strategy: framework
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+agrothulir:
+  bootstrap-password: ${BOOTSTRAP_INITIAL_PASSWORD}

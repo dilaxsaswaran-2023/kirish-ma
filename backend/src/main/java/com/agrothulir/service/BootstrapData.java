@@ -1,6 +1,7 @@
 package com.agrothulir.service;
 
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,7 +18,13 @@ public class BootstrapData {
     public static class BootstrapSeeder {
         private final JdbcTemplate jdbc;
         private final AuthService auth;
-        public BootstrapSeeder(JdbcTemplate jdbc, AuthService auth) { this.jdbc = jdbc; this.auth = auth; }
+        private final String initialPassword;
+        public BootstrapSeeder(JdbcTemplate jdbc, AuthService auth,
+            @Value("${agrothulir.bootstrap-password}") String initialPassword) {
+            this.jdbc = jdbc;
+            this.auth = auth;
+            this.initialPassword = initialPassword;
+        }
 
         @Transactional
         public void seed() {
@@ -62,12 +69,12 @@ public class BootstrapData {
             if (!rows.isEmpty()) {
                 String id = rows.get(0);
                 if (jdbc.queryForObject("SELECT password_hash FROM users WHERE id=?", String.class, id) == null)
-                    jdbc.update("UPDATE users SET password_hash=? WHERE id=? AND password_hash IS NULL", auth.encodePassword("12345678"), id);
+                    jdbc.update("UPDATE users SET password_hash=? WHERE id=? AND password_hash IS NULL", auth.encodePassword(initialPassword), id);
                 return id;
             }
             String id = newId();
             jdbc.update("INSERT INTO users(id,identity_subject,display_name,account_status,email,password_hash) VALUES (?,?,?,'ACTIVE',?,?)",
-                id, "local|" + email, name, email, auth.encodePassword("12345678"));
+                id, "local|" + email, name, email, auth.encodePassword(initialPassword));
             return id;
         }
 
