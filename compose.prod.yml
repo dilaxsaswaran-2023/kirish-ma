@@ -36,6 +36,7 @@ services:
       - "5030:8080"
     networks:
       - private
+      - public
 
   web:
     build:
