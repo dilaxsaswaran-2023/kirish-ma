@@ -8,10 +8,10 @@ The startup seeder creates missing Kirish records without replacing existing one
 
 | Role | Email | Initial password |
 | --- | --- | --- |
-| Super admin | `superadmin@gmail.com` | `12345678` |
-| Kirish Corp admin | `kirish@gmail.com` | `12345678` |
-| Site manager | `sitemanager@kirish.com` | `12345678` |
-| Operator | `operator@kirish.com` | `12345678` |
+| Super admin | `superadmin@gmail.com` | configured bootstrap password |
+| Kirish Corp admin | `kirish@gmail.com` | configured bootstrap password |
+| Site manager | `sitemanager@kirish.com` | configured bootstrap password |
+| Operator | `operator@kirish.com` | configured bootstrap password |
 
 Passwords are stored as BCrypt hashes. Existing seeded users keep their passwords across restarts. Replace these initial passwords after deployment.
 
