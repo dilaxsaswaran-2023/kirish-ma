@@ -6,6 +6,7 @@ export type RouteParams = {
 
   sites: undefined;
   site: {siteId: string};
+  zone: {zoneId: string};
   devices: {siteId: string};
   device: {deviceId: string};
   components: {deviceId: string};
@@ -66,6 +67,7 @@ export const TAB_FOR_ROUTE: Partial<Record<RouteName, TabName>> = {
   settings: 'home',
   sites: 'sites',
   site: 'sites',
+  zone: 'sites',
   devices: 'sites',
   device: 'sites',
   components: 'sites',

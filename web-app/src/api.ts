@@ -5,6 +5,13 @@ export type Session = {token: string; expiresAt: string; userId: string; corpora
 export type Me = {id: string; display_name: string; account_status: string; activeCorporationId: string; role: string};
 export type Site = {id: string; name: string; type: string; location: string; health: string; moisture: number | null; pressure: number | null};
 export type Device = {id: string; site_id: string; name: string; model: string; serial?: string; status: string; last_seen_at: string | null; actuator_count: number; sensor_count: number};
+export type Zone = {id: string; site_id: string; name: string; site_name: string; location: string | null; health: string; device_count: number; online_count: number | null};
+export type ZoneDetail = Zone & {devices: Device[]};
+export type DeviceComponent = {id: string; device_id: string; kind: string; name: string; hardware_channel: string;
+  reported_state: string | null; feedback_quality: string; latest_value: string | null; state_version: number;
+  measured_at: string | null; display_order: number};
+export type DeviceDetail = Device & {zone_id: string; zone_name: string; site_name: string; firmware: string | null; components: DeviceComponent[]};
+export type SensorReading = {id: string; component_id: string; component_name: string; value: string; unit: string | null; quality: string; measured_at: string};
 export type Alert = {id: string; site_id: string; severity: string; title: string; detail: string; raised_at: string; acknowledged_at: string | null};
 export type Schedule = {id: string; site_id: string; name: string; recurrence: string; next_due_at: string | null; enabled: boolean};
 export type User = {id: string; email: string; display_name: string; account_status: string; corporate_role: string};
@@ -15,7 +22,8 @@ export type SiteComponent = {id: string; device_id: string; device_name: string;
   name: string; hardware_channel: string; reported_state: string | null; feedback_quality: string};
 export type OperationalFlow = {id: string; site_id: string; name: string; status: string; published_version: number; step_count: number};
 export type OperationalFlowStep = {id: string; step_index: number; component_id: string; component_name: string;
-  kind: string; on_action: string; off_action: string; device_name: string; device_status: string};
+  kind: string; on_action: string; off_action: string; device_id: string; device_name: string; device_status: string;
+  reported_state: string | null; feedback_quality: string};
 export type OperationalFlowDetail = OperationalFlow & {steps: OperationalFlowStep[]; online: boolean;
   currentState: 'ON' | 'OFF' | 'UNKNOWN'};
 
@@ -27,7 +35,7 @@ export function setToken(next: string | null) {
 }
 export function hasToken() { return Boolean(token); }
 
-export async function api<T>(path: string, options: {method?: string; body?: unknown} = {}): Promise<T> {
+export async function api<T>(path: string, options: {method?: string; body?: unknown; headers?: Record<string, string>} = {}): Promise<T> {
   if (!BASE_URL) throw new Error('VITE_BASE_URL is missing. Configure the hosted backend URL in .env.');
   let response: Response;
   try {
@@ -38,6 +46,7 @@ export async function api<T>(path: string, options: {method?: string; body?: unk
         'Content-Type': 'application/json',
         ...(isNgrokFreeTunnel ? {'ngrok-skip-browser-warning': '1'} : {}),
         ...(token ? {Authorization: `Bearer ${token}`} : {}),
+        ...options.headers,
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: AbortSignal.timeout(15000),

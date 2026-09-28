@@ -71,18 +71,47 @@ public class PlatformService {
     public Map<String, Object> site(TenantContext context, String siteId) {
         requireSiteAccess(context, siteId);
         Map<String, Object> site = one("SELECT id,name,type,location,timezone,health,moisture,pressure FROM sites WHERE id=? AND corporation_id=?", siteId, context.corporationId());
-        site.put("zones", maps("SELECT id,name FROM zones WHERE corporation_id=? AND site_id=? ORDER BY name", context.corporationId(), siteId));
+        site.put("zones", maps("SELECT z.id,z.site_id,z.name,COUNT(d.id) AS device_count,SUM(CASE WHEN d.status='ONLINE' THEN 1 ELSE 0 END) AS online_count FROM zones z LEFT JOIN devices d ON d.zone_id=z.id AND d.corporation_id=z.corporation_id WHERE z.corporation_id=? AND z.site_id=? GROUP BY z.id,z.site_id,z.name ORDER BY z.name", context.corporationId(), siteId));
         site.put("deviceCounts", one("SELECT COUNT(*) AS total, SUM(CASE WHEN status='ONLINE' THEN 1 ELSE 0 END) AS online FROM devices WHERE corporation_id=? AND site_id=?", context.corporationId(), siteId));
         return site;
     }
 
-    public List<Map<String, Object>> devices(TenantContext context, String siteId) {
-        requireSiteAccess(context, siteId);
-        return maps("SELECT d.id,d.site_id,d.name,d.model,d.firmware,d.status,d.last_seen_at,(SELECT COUNT(*) FROM components c WHERE c.device_id=d.id AND c.kind IN ('PUMP','VALVE')) AS actuator_count,(SELECT COUNT(*) FROM components c WHERE c.device_id=d.id AND c.kind='SENSOR') AS sensor_count FROM devices d WHERE d.corporation_id=? AND d.site_id=? ORDER BY d.name", context.corporationId(), siteId);
+    public List<Map<String, Object>> zones(TenantContext context) {
+        String access = " AND (EXISTS(SELECT 1 FROM site_grants g WHERE g.site_id=z.site_id AND g.user_id=?) OR ? IN ('CORPORATE_ADMIN','SUPER_ADMIN')) ";
+        return maps("SELECT z.id,z.site_id,z.name,s.name AS site_name,s.location,s.health,COUNT(d.id) AS device_count," +
+            "SUM(CASE WHEN d.status='ONLINE' THEN 1 ELSE 0 END) AS online_count FROM zones z JOIN sites s ON s.id=z.site_id " +
+            "LEFT JOIN devices d ON d.zone_id=z.id AND d.corporation_id=z.corporation_id WHERE z.corporation_id=?" + access +
+            "GROUP BY z.id,z.site_id,z.name,s.name,s.location,s.health ORDER BY s.name,z.name",
+            context.corporationId(), context.userId(), context.role().name());
     }
 
+    public Map<String, Object> zone(TenantContext context, String zoneId) {
+        Map<String, Object> zone = one("SELECT z.id,z.site_id,z.name,s.name AS site_name,s.location,s.health FROM zones z JOIN sites s ON s.id=z.site_id WHERE z.id=? AND z.corporation_id=?", zoneId, context.corporationId());
+        requireSiteAccess(context, Objects.toString(zone.get("site_id")));
+        zone.put("devices", devices(context, Objects.toString(zone.get("site_id")), zoneId));
+        return zone;
+    }
+
+    public List<Map<String, Object>> devices(TenantContext context, String siteId, String zoneId) {
+        String resolvedSite = siteId;
+        if ((resolvedSite == null || resolvedSite.isBlank()) && zoneId != null && !zoneId.isBlank())
+            resolvedSite = Objects.toString(one("SELECT site_id FROM zones WHERE id=? AND corporation_id=?", zoneId, context.corporationId()).get("site_id"));
+        if (resolvedSite == null || resolvedSite.isBlank())
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SITE_OR_ZONE_REQUIRED", "Choose a site or zone.");
+        requireSiteAccess(context, resolvedSite);
+        String zoneFilter = zoneId == null || zoneId.isBlank() ? "" : " AND d.zone_id=?";
+        String sql = "SELECT d.id,d.site_id,d.zone_id,z.name AS zone_name,d.name,d.model,d.firmware,d.serial,d.status,d.last_seen_at," +
+            "(SELECT COUNT(*) FROM components c WHERE c.device_id=d.id AND c.kind IN ('PUMP','VALVE','MOTOR','SWITCH','RELAY')) AS actuator_count," +
+            "(SELECT COUNT(*) FROM components c WHERE c.device_id=d.id AND c.kind='SENSOR') AS sensor_count " +
+            "FROM devices d LEFT JOIN zones z ON z.id=d.zone_id WHERE d.corporation_id=? AND d.site_id=?" + zoneFilter + " ORDER BY d.name";
+        return zoneId == null || zoneId.isBlank() ? maps(sql, context.corporationId(), resolvedSite) :
+            maps(sql, context.corporationId(), resolvedSite, zoneId);
+    }
+
+    public List<Map<String, Object>> devices(TenantContext context, String siteId) { return devices(context, siteId, null); }
+
     public Map<String, Object> device(TenantContext context, String deviceId) {
-        Map<String, Object> device = one("SELECT id,site_id,name,model,firmware,status,last_seen_at,serial FROM devices WHERE id=? AND corporation_id=?", deviceId, context.corporationId());
+        Map<String, Object> device = one("SELECT d.id,d.site_id,d.zone_id,z.name AS zone_name,s.name AS site_name,d.name,d.model,d.firmware,d.status,d.last_seen_at,d.serial FROM devices d JOIN sites s ON s.id=d.site_id LEFT JOIN zones z ON z.id=d.zone_id WHERE d.id=? AND d.corporation_id=?", deviceId, context.corporationId());
         requireSiteAccess(context, Objects.toString(device.get("site_id")));
         device.put("components", components(context, deviceId));
         return device;
@@ -99,7 +128,7 @@ public class PlatformService {
     public List<Map<String, Object>> components(TenantContext context, String deviceId) {
         Map<String, Object> device = one("SELECT site_id FROM devices WHERE id=? AND corporation_id=?", deviceId, context.corporationId());
         requireSiteAccess(context, Objects.toString(device.get("site_id")));
-        return maps("SELECT id,device_id,kind,name,hardware_channel,reported_state,feedback_quality,latest_value,state_version,measured_at FROM components WHERE corporation_id=? AND device_id=? ORDER BY name", context.corporationId(), deviceId);
+        return maps("SELECT id,device_id,kind,name,hardware_channel,reported_state,feedback_quality,latest_value,state_version,measured_at,display_order FROM components WHERE corporation_id=? AND device_id=? ORDER BY display_order,name", context.corporationId(), deviceId);
     }
 
     public Map<String, Object> diagnostics(TenantContext context, String deviceId) {
@@ -112,12 +141,32 @@ public class PlatformService {
 
     public Map<String, Object> topology(TenantContext context, String siteId) {
         Map<String, Object> site = site(context, siteId);
-        List<Map<String, Object>> componentRows = maps("SELECT id FROM components WHERE site_id=? AND corporation_id=? ORDER BY id", siteId, context.corporationId());
+        Map<String, Object> corporation = one("SELECT id,name FROM corporations WHERE id=?", context.corporationId());
+        List<Map<String, Object>> deviceRows = maps("SELECT id,zone_id,name FROM devices WHERE site_id=? AND corporation_id=? ORDER BY name", siteId, context.corporationId());
+        List<Map<String, Object>> componentRows = maps("SELECT id,device_id,name,kind FROM components WHERE site_id=? AND corporation_id=? ORDER BY device_id,display_order,name", siteId, context.corporationId());
         @SuppressWarnings("unchecked") List<Map<String, Object>> zoneRows = (List<Map<String, Object>>) site.get("zones");
-        List<String> nodes = new ArrayList<>();
-        zoneRows.forEach(zone -> nodes.add(Objects.toString(zone.get("id"))));
-        componentRows.forEach(component -> nodes.add(Objects.toString(component.get("id"))));
-        return Map.of("siteId", siteId, "status", "UNCONFIGURED", "nodes", nodes, "connections", List.of());
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        List<Map<String, Object>> connections = new ArrayList<>();
+        nodes.add(Map.of("id", corporation.get("id"), "type", "CORPORATION", "name", corporation.get("name")));
+        nodes.add(Map.of("id", siteId, "type", "SITE", "name", site.get("name")));
+        connections.add(Map.of("from", corporation.get("id"), "to", siteId, "type", "CONTAINS"));
+        zoneRows.forEach(zone -> {
+            nodes.add(Map.of("id", zone.get("id"), "type", "ZONE", "name", zone.get("name")));
+            connections.add(Map.of("from", siteId, "to", zone.get("id"), "type", "CONTAINS"));
+        });
+        boolean complete = deviceRows.stream().allMatch(device -> device.get("zone_id") != null);
+        deviceRows.forEach(device -> {
+            nodes.add(Map.of("id", device.get("id"), "type", "DEVICE", "name", device.get("name")));
+            Object parent = device.get("zone_id") == null ? siteId : device.get("zone_id");
+            connections.add(Map.of("from", parent, "to", device.get("id"),
+                "type", device.get("zone_id") == null ? "LEGACY_UNASSIGNED" : "CONTAINS"));
+        });
+        componentRows.forEach(component -> {
+            nodes.add(Map.of("id", component.get("id"), "type", "COMPONENT", "name", component.get("name"), "kind", component.get("kind")));
+            connections.add(Map.of("from", component.get("device_id"), "to", component.get("id"), "type", "CONTAINS"));
+        });
+        return Map.of("siteId", siteId, "status", complete ? "CONFIGURED" : "NEEDS_ZONE_ASSIGNMENT",
+            "nodes", nodes, "connections", connections);
     }
 
     public String pumpForFlow(TenantContext context, String flowId) {

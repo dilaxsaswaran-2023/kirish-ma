@@ -26,6 +26,8 @@ import type {
   SiteDetail,
   Topology,
   Workspace,
+  Zone,
+  ZoneDetail,
 } from './types';
 
 /** One function per documented route in backend ApiController. */
@@ -41,10 +43,14 @@ export const selectWorkspace = (corporationId: string) =>
 
 export const getSites = () => request<Site[]>('/v1/sites');
 export const getSite = (siteId: string) => request<SiteDetail>(`/v1/sites/${siteId}`);
+export const getZones = () => request<Zone[]>('/v1/zones');
+export const getZone = (zoneId: string) => request<ZoneDetail>(`/v1/zones/${zoneId}`);
 export const getTopology = (siteId: string) => request<Topology>(`/v1/sites/${siteId}/topology`);
 
 export const getDevices = (siteId: string) =>
   request<Device[]>(`/v1/devices?siteId=${encodeURIComponent(siteId)}`);
+export const getZoneDevices = (zoneId: string) =>
+  request<Device[]>(`/v1/devices?zoneId=${encodeURIComponent(zoneId)}`);
 export const getDevice = (deviceId: string) => request<DeviceDetail>(`/v1/devices/${deviceId}`);
 export const getComponents = (deviceId: string) =>
   request<DeviceComponent[]>(`/v1/devices/${deviceId}/components`);
@@ -52,12 +58,21 @@ export const getCapabilities = (deviceId: string) =>
   request<Capabilities>(`/v1/devices/${deviceId}/capabilities`);
 export const getDiagnostics = (deviceId: string) =>
   request<Diagnostics>(`/v1/devices/${deviceId}/diagnostics`);
+export const updateComponent = (component: DeviceComponent) =>
+  request<DeviceComponent>(`/v1/admin/components/${component.id}`, {method: 'PUT', body: {
+    kind: component.kind, name: component.name, hardwareChannel: component.hardware_channel,
+    displayOrder: component.display_order,
+  }});
 
 export const getFlows = () => request<Flow[]>('/v1/flows');
 export const getOperationalFlows = (siteId: string) =>
   request<OperationalFlow[]>(`/v1/sites/${siteId}/operational-flows`);
 export const getOperationalFlow = (flowId: string) =>
   request<OperationalFlowDetail>(`/v1/operational-flows/${flowId}`);
+export const updateOperationalFlow = (flowId: string, name: string, componentIds: string[]) =>
+  request<OperationalFlowDetail>(`/v1/admin/operational-flows/${flowId}`, {
+    method: 'PUT', body: {name, componentIds},
+  });
 export const operateFlow = (flowId: string, action: 'ON' | 'OFF') =>
   request<OperationalRun>(`/v1/operational-flows/${flowId}/actions`, {
     method: 'POST', headers: {'Idempotency-Key': idempotencyKey(`operational-${flowId}-${action}`)}, body: {action},

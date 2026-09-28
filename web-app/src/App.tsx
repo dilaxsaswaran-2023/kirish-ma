@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode} from 'react';
 import {Activity, ArrowRight, Bell, Building2, CalendarDays, ChevronDown, CircleHelp, ClipboardList, Cloud, Cpu, Droplets, LayoutDashboard, Leaf, LogOut, Menu, Plus, RefreshCw, Search, ShieldCheck, Users, X} from 'lucide-react';
-import {api, BASE_URL, hasToken, login, setToken, type Alert, type Audit, type Corporation, type Device, type Me, type Overview, type Schedule, type Site, type User} from './api';
+import {api, BASE_URL, hasToken, login, setToken, type Alert, type Audit, type Corporation, type Device, type Me, type Overview, type Schedule, type Site, type User, type Zone} from './api';
 import SiteFlowManager from './SiteFlowManager';
+import OperationsHierarchy from './OperationsHierarchy';
 
 type Section = 'overview' | 'corporations' | 'users' | 'sites' | 'devices' | 'schedules' | 'alerts' | 'audit';
 type Modal = 'corporation' | 'user' | 'site' | 'device' | null;
@@ -53,6 +54,7 @@ export default function App() {
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -73,16 +75,18 @@ export default function App() {
     setLoading(true); setError('');
     try {
       const profile = await api<Me>('/v1/me'); setMe(profile);
-      const [siteRows, alertRows, scheduleRows, auditRows] = await Promise.all([
-        api<Site[]>('/v1/sites'), api<Alert[]>('/v1/alerts'), api<Schedule[]>('/v1/schedules'), api<Audit[]>('/v1/audit-events')]);
+      const [siteRows, zoneRows, alertRows, scheduleRows, auditRows, workspaceRows] = await Promise.all([
+        api<Site[]>('/v1/sites'), api<Zone[]>('/v1/zones'), api<Alert[]>('/v1/alerts'), api<Schedule[]>('/v1/schedules'),
+        api<Audit[]>('/v1/audit-events'), api<Corporation[]>('/v1/me/workspaces')]);
       setSites(siteRows); setAlerts(alertRows); setSchedules(scheduleRows); setAudit(auditRows);
+      setZones(zoneRows); setCorporations(workspaceRows);
       setDevices((await Promise.all(siteRows.map(site => api<Device[]>(`/v1/devices?siteId=${encodeURIComponent(site.id)}`)))).flat());
       if (profile.role === 'SUPER_ADMIN' || profile.role === 'CORPORATE_ADMIN') setUsers(await api<User[]>('/v1/admin/users'));
       else setUsers([]);
       if (profile.role === 'SUPER_ADMIN') {
         const [corporationRows, counts] = await Promise.all([api<Corporation[]>('/v1/platform/corporations'), api<Overview>('/v1/platform/overview')]);
         setCorporations(corporationRows); setOverview(counts);
-      } else { setCorporations([]); setOverview(null); }
+      } else { setOverview(null); }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Could not load workspace data.';
       setError(message);
@@ -112,7 +116,7 @@ export default function App() {
     <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-top"><div className="brand"><span className="brand-mark"><Leaf size={24} /></span><span>Kirish<span className="brand-dot">.</span></span></div><button className="icon-button mobile-close" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={20} /></button></div>
       <button className="workspace-card" onClick={() => setWorkspaceOpen(value => !value)}><div className="workspace-icon"><Building2 size={19} /></div><div><strong>{corporations.find(corp => corp.id === me?.activeCorporationId)?.name ?? 'Kirish Workspace'}</strong><small>{readable(me?.role ?? 'loading')}</small></div><ChevronDown size={16} /></button>
-      {workspaceOpen && me?.role === 'SUPER_ADMIN' && <div className="workspace-menu">{corporations.map(corp => <button key={corp.id} className={corp.id === me.activeCorporationId ? 'selected' : ''} onClick={async () => {try {await api('/v1/auth/context', {method: 'POST', body: {corporationId: corp.id}}); setWorkspaceOpen(false); setSection('overview'); setRevision(value => value + 1);} catch (cause) {setError(String(cause));}}}>{corp.name}</button>)}</div>}
+      {workspaceOpen && <div className="workspace-menu">{corporations.map(corp => <button key={corp.id} className={corp.id === me?.activeCorporationId ? 'selected' : ''} onClick={async () => {try {await api('/v1/auth/context', {method: 'POST', body: {corporationId: corp.id}}); setWorkspaceOpen(false); setSection('overview'); setRevision(value => value + 1);} catch (cause) {setError(String(cause));}}}>{corp.name}</button>)}</div>}
       <div className="nav-caption">WORKSPACE</div><nav className="nav-list">{visibleNav.map(item => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => {setSection(item.id); setSearch(''); setMenuOpen(false);}}><item.icon size={19} strokeWidth={1.9} />{item.label}{item.id === 'alerts' && alerts.filter(alert => !alert.acknowledged_at).length > 0 && <span className="nav-count">{alerts.filter(alert => !alert.acknowledged_at).length}</span>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="help-card"><CircleHelp size={20} /><strong>Service connection</strong><small>{BASE_URL}</small><span className="connected"><span /> API configured</span></div><button className="nav-item signout" onClick={() => void signOut()}><LogOut size={19} />Sign out</button></div>
     </aside>
@@ -121,6 +125,7 @@ export default function App() {
       <div className="content"><div className="page-heading"><div><span className="eyebrow">KIRISH OPERATIONS</span><h1>{section === 'overview' ? 'Overview' : navigation.find(item => item.id === section)?.label}</h1><p>{section === 'overview' ? `Good to see you, ${me?.display_name ?? 'admin'}. Here is what is happening across your workspace.` : `Current information from your connected workspace.`}</p></div><div className="heading-actions">{section === 'corporations' && me?.role === 'SUPER_ADMIN' && <button className="primary" onClick={() => setModal('corporation')}><Plus size={17} /> Add corporation</button>}{section === 'users' && canCorporate && <button className="primary" onClick={() => setModal('user')}><Plus size={17} /> Add member</button>}{section === 'sites' && canCorporate && <button className="primary" onClick={() => setModal('site')}><Plus size={17} /> Add site</button>}{section === 'devices' && canManage && <button className="primary" onClick={() => setModal('device')}><Plus size={17} /> Register device</button>}</div></div>
         {error && <div className="form-error page-error" role="alert">{error}<button onClick={() => setRevision(value => value + 1)}>Retry</button></div>}
         {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss"><X size={17} /></button></div>}
+        {section === 'overview' && <OperationsHierarchy key={me?.activeCorporationId} sites={sites} canManage={Boolean(canManage)} canControl={me?.role !== 'VIEWER'} corporationName={corporations.find(corp => corp.id === me?.activeCorporationId)?.name ?? 'Kirish Workspace'} onChanged={() => setRevision(value => value + 1)} />}
         {section === 'overview' && <>{overview && <div className="platform-strip"><Building2 size={17} /><span>Platform-wide: <strong>{overview.corporations} corporations</strong> · {overview.sites} sites · {overview.devicesOnline} devices online</span><Badge value={overview.health} /></div>}<div className="metrics-grid">{metrics.map(metric => <div className="metric-card" key={metric.label}><div className={`metric-icon ${metric.tone}`}><metric.icon size={23} /></div><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></div>)}</div>
           <div className="overview-grid"><div className="panel"><div className="panel-heading"><div><h2>Sites at a glance</h2><p>Health and field conditions</p></div><button className="text-button" onClick={() => setSection('sites')}>View all <ArrowRight size={16} /></button></div><div className="site-list">{sites.slice(0, 4).map(site => <div className="site-row" key={site.id}><div className="site-symbol"><Droplets size={20} /></div><div className="site-text"><strong>{site.name}</strong><small>{site.location} · {readable(site.type)}</small></div><Badge value={site.health} /></div>)}{sites.length === 0 && <Empty message="No sites are available for this account." />}</div></div>
             <div className="panel"><div className="panel-heading"><div><h2>Attention needed</h2><p>Latest alerts in your workspace</p></div><button className="text-button" onClick={() => setSection('alerts')}>View all <ArrowRight size={16} /></button></div><div className="attention-list">{alerts.slice(0, 4).map(alert => <div className="attention-row" key={alert.id}><span className={`alert-dot ${alert.severity.toLowerCase()}`} /><div><strong>{alert.title}</strong><small>{siteName(alert.site_id)} · {shortDate(alert.raised_at)}</small></div><Badge value={alert.severity} /></div>)}{alerts.length === 0 && <Empty message="No alerts are currently recorded." />}</div></div></div>
@@ -134,10 +139,10 @@ export default function App() {
           {section === 'alerts' && <Table headers={['Alert', 'Site', 'Severity', 'Raised', 'Action']} rows={filter(alerts).map(alert => [<CellTitle icon={<Bell size={18} />} title={alert.title} subtitle={alert.detail} />, siteName(alert.site_id), <Badge value={alert.severity} />, shortDate(alert.raised_at), alert.acknowledged_at ? <Badge value="ACKNOWLEDGED" /> : <button className="secondary small" onClick={async () => {try {await api(`/v1/alerts/${alert.id}/acknowledgements`, {method: 'POST'}); setNotice('Alert acknowledged.'); setRevision(value => value + 1);} catch (cause) {setError(String(cause));}}}>Acknowledge</button>])} />}
           {section === 'audit' && <Table headers={['Operation', 'Actor', 'Target', 'When']} rows={filter(audit).map(event => [<CellTitle icon={<Activity size={18} />} title={readable(event.operation)} subtitle={event.summary} />, event.actor_id, event.target, shortDate(event.occurred_at)])} />}
         </div>}
-        {section === 'sites' && selectedSiteId && sites.find(site => site.id === selectedSiteId) && <SiteFlowManager key={selectedSiteId} site={sites.find(site => site.id === selectedSiteId)!} devices={devices} canManage={Boolean(canManage)} onChanged={() => setRevision(value => value + 1)} onClose={() => setSelectedSiteId(null)} />}
+        {section === 'sites' && selectedSiteId && sites.find(site => site.id === selectedSiteId) && <SiteFlowManager key={selectedSiteId} site={sites.find(site => site.id === selectedSiteId)!} devices={devices} zones={zones} canManage={Boolean(canManage)} onChanged={() => setRevision(value => value + 1)} onClose={() => setSelectedSiteId(null)} />}
         <footer className="content-footer"><span>Data served by {BASE_URL}</span><span><span className="footer-dot" /> Connected workspace</span></footer>
       </div></main>
-    {modal && <CreateModal type={modal} sites={sites} platformAdmin={me?.role === 'SUPER_ADMIN'} onClose={() => setModal(null)} onCreated={() => {setModal(null); setNotice('Record created successfully.'); setRevision(value => value + 1);}} />}
+    {modal && <CreateModal type={modal} sites={sites} zones={zones} platformAdmin={me?.role === 'SUPER_ADMIN'} onClose={() => setModal(null)} onCreated={() => {setModal(null); setNotice('Record created successfully.'); setRevision(value => value + 1);}} />}
   </div>;
 }
 
@@ -145,8 +150,8 @@ function Empty({message}: {message: string}) { return <div className="empty">{me
 function CellTitle({icon, title, subtitle}: {icon: ReactNode; title: string; subtitle?: string | null}) { return <div className="cell-title"><span className="cell-icon">{icon}</span><span><strong>{title}</strong><small>{subtitle || '—'}</small></span></div>; }
 function Table({headers, rows}: {headers: string[]; rows: ReactNode[][]}) { return <div className="table-scroll"><table><thead><tr>{headers.map(header => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table>{rows.length === 0 && <Empty message="No matching records found." />}</div>; }
 
-function CreateModal({type, sites, platformAdmin, onClose, onCreated}: {type: Exclude<Modal, null>; sites: Site[]; platformAdmin: boolean; onClose: () => void; onCreated: () => void}) {
-  const [fields, setFields] = useState<Record<string, string>>({role: 'OPERATOR', siteId: sites[0]?.id ?? '', type: 'FARM', defaultTimezone: 'Asia/Colombo'});
+function CreateModal({type, sites, zones, platformAdmin, onClose, onCreated}: {type: Exclude<Modal, null>; sites: Site[]; zones: Zone[]; platformAdmin: boolean; onClose: () => void; onCreated: () => void}) {
+  const [fields, setFields] = useState<Record<string, string>>({role: 'OPERATOR', siteId: sites[0]?.id ?? '', zoneId: zones.find(zone => zone.site_id === sites[0]?.id)?.id ?? '', type: 'FARM', defaultTimezone: 'Asia/Colombo'});
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const set = (field: string) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setFields(current => ({...current, [field]: event.target.value}));
   async function submit(event: FormEvent) {
@@ -163,6 +168,6 @@ function CreateModal({type, sites, platformAdmin, onClose, onCreated}: {type: Ex
     <form onSubmit={submit} className="modal-form">{type === 'corporation' && <>{input('Corporation name', 'name')}{input('Workspace code', 'workspaceCode')}{input('Timezone', 'defaultTimezone')}</>}
       {type === 'user' && <>{input('Display name', 'displayName')}{input('Email address', 'email', true, 'email')}{input('Initial password', 'password', true, 'password')}<label>Role<select value={fields.role} onChange={set('role')}><option value="OPERATOR">Operator</option><option value="SITE_MANAGER">Site manager</option><option value="VIEWER">Viewer</option>{platformAdmin && <option value="CORPORATE_ADMIN">Corporate admin</option>}</select></label>{fields.role !== 'CORPORATE_ADMIN' && <label>Site access<select value={fields.siteId} onChange={set('siteId')} required>{sites.map(site => <option value={site.id} key={site.id}>{site.name}</option>)}</select></label>}</>}
       {type === 'site' && <>{input('Site name', 'name')}<label>Site type<select value={fields.type} onChange={set('type')}><option value="FARM">Farm</option><option value="GREENHOUSE">Greenhouse</option><option value="BUILDING">Building</option></select></label>{input('Location', 'location')}</>}
-      {type === 'device' && <><label>Site<select value={fields.siteId} onChange={set('siteId')} required>{sites.map(site => <option value={site.id} key={site.id}>{site.name}</option>)}</select></label>{input('Device name', 'name')}{input('Serial number', 'serial')}{input('Model', 'model')}</>}
+      {type === 'device' && <><label>Site<select value={fields.siteId} onChange={event => {const siteId = event.target.value; setFields(current => ({...current, siteId, zoneId: zones.find(zone => zone.site_id === siteId)?.id ?? ''}));}} required>{sites.map(site => <option value={site.id} key={site.id}>{site.name}</option>)}</select></label><label>Zone<select value={fields.zoneId} onChange={set('zoneId')} required><option value="">Choose zone</option>{zones.filter(zone => zone.site_id === fields.siteId).map(zone => <option value={zone.id} key={zone.id}>{zone.name}</option>)}</select></label>{input('Device name', 'name')}{input('Serial number', 'serial')}{input('Model', 'model')}</>}
       {error && <div className="form-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Create record'}</button></div></form></div></div>;
 }

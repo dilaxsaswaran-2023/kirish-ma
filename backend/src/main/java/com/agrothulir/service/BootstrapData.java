@@ -9,6 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.sql.Timestamp;
+import java.time.Instant;
 
 @Configuration
 public class BootstrapData {
@@ -40,17 +42,38 @@ public class BootstrapData {
 
             String farm = site(corporation, "Kirish Farm", "FARM", "Kilinochchi");
             String greenhouse = site(corporation, "Kirish Greenhouse", "GREENHOUSE", "Vavuniya");
-            String zone = zone(corporation, farm, "Controller Zone A");
+            String northZone = zone(corporation, farm, "North Irrigation");
+            String southZone = zone(corporation, farm, "South Field");
+            String climateZone = zone(corporation, greenhouse, "Climate House");
+            String nurseryZone = zone(corporation, greenhouse, "Nursery");
             grant(corporation, farm, manager, "SITE_MANAGER");
             grant(corporation, greenhouse, manager, "SITE_MANAGER");
             grant(corporation, farm, operator, "OPERATOR");
 
-            String controller = device(corporation, farm, zone, "KIR-AT8X-001", "Farm Controller", "AT-8X");
-            String climate = device(corporation, greenhouse, null, "KIR-CLIMA-001", "Greenhouse Climate Station", "AT-CLIMA");
+            String controller = device(corporation, farm, northZone, "KIR-AT8X-001", "North Pump Controller", "AT-8X");
+            String field = device(corporation, farm, southZone, "KIR-FIELD-001", "South Field Controller", "AT-6X");
+            String climate = device(corporation, greenhouse, climateZone, "KIR-CLIMA-001", "Greenhouse Climate Station", "AT-CLIMA");
+            String nursery = device(corporation, greenhouse, nurseryZone, "KIR-NURSERY-001", "Nursery Controller", "AT-4X");
             String valve = component(corporation, farm, controller, "VALVE", "Isolation Valve", "DO1 / DI1");
             String motor = component(corporation, farm, controller, "PUMP", "Farm Motor", "DO2 / DI2");
-            component(corporation, farm, controller, "SENSOR", "Soil Moisture", "AI1");
-            component(corporation, greenhouse, climate, "SENSOR", "Air Temperature", "AI1");
+            String moisture = component(corporation, farm, controller, "SENSOR", "Soil Moisture", "AI1");
+            String pressure = component(corporation, farm, controller, "SENSOR", "Line Pressure", "AI2");
+            component(corporation, farm, field, "VALVE", "South Main Valve", "SOUTH-DO1 / DI1");
+            component(corporation, farm, field, "MOTOR", "Fertilizer Mixer", "SOUTH-DO2 / DI2");
+            String fieldTemperature = component(corporation, farm, field, "SENSOR", "Field Temperature", "SOUTH-AI1");
+            String airTemperature = component(corporation, greenhouse, climate, "SENSOR", "Air Temperature", "CLIMATE-AI1");
+            String humidity = component(corporation, greenhouse, climate, "SENSOR", "Humidity", "CLIMATE-AI2");
+            component(corporation, greenhouse, climate, "RELAY", "Ventilation Fans", "CLIMATE-DO1");
+            component(corporation, greenhouse, nursery, "VALVE", "Misting Valve", "NURSERY-DO1 / DI1");
+            component(corporation, greenhouse, nursery, "SWITCH", "Grow Lights", "NURSERY-DO2");
+            String nurseryHumidity = component(corporation, greenhouse, nursery, "SENSOR", "Nursery Humidity", "NURSERY-AI1");
+            arrange(controller, valve, motor, moisture, pressure);
+            reading(corporation, farm, controller, moisture, "41.8", "%");
+            reading(corporation, farm, controller, pressure, "2.4", "bar");
+            reading(corporation, farm, field, fieldTemperature, "29.6", "C");
+            reading(corporation, greenhouse, climate, airTemperature, "27.2", "C");
+            reading(corporation, greenhouse, climate, humidity, "68", "%");
+            reading(corporation, greenhouse, nursery, nurseryHumidity, "74", "%");
             String flow = flow(corporation, farm);
             flowSteps(corporation, farm, flow, valve, motor);
             schedule(corporation, farm, flow);
@@ -109,7 +132,10 @@ public class BootstrapData {
         private String device(String corporation, String site, String zone, String serial, String name, String model) {
             List<String> rows = jdbc.queryForList("SELECT id FROM devices WHERE corporation_id=? AND site_id=? AND LOWER(name)=LOWER(?)",
                 String.class, corporation, site, name);
-            if (!rows.isEmpty()) return rows.get(0);
+            if (!rows.isEmpty()) {
+                jdbc.update("UPDATE devices SET zone_id=? WHERE id=? AND (zone_id IS NULL OR zone_id<>?)", zone, rows.get(0), zone);
+                return rows.get(0);
+            }
             String id = newId();
             String availableSerial = count("SELECT COUNT(*) FROM devices WHERE serial=?", serial) == 0 ? serial : serial + "-" + UUID.randomUUID();
             jdbc.update("INSERT INTO devices(id,corporation_id,site_id,zone_id,serial,name,model,status) VALUES (?,?,?,?,?,?,?,'OFFLINE')",
@@ -125,6 +151,18 @@ public class BootstrapData {
             jdbc.update("INSERT INTO components(id,corporation_id,site_id,device_id,kind,name,hardware_channel,feedback_quality) VALUES (?,?,?,?,?,?,?,'UNKNOWN')",
                 id, corporation, site, device, kind, name, channel);
             return id;
+        }
+
+        private void arrange(String device, String... components) {
+            for (int index = 0; index < components.length; index++)
+                jdbc.update("UPDATE components SET display_order=? WHERE id=? AND device_id=?", index + 1, components[index], device);
+        }
+
+        private void reading(String corporation, String site, String device, String component, String value, String unit) {
+            if (count("SELECT COUNT(*) FROM sensor_readings WHERE component_id=?", component) > 0) return;
+            jdbc.update("INSERT INTO sensor_readings(id,corporation_id,site_id,device_id,component_id,reading_value,unit,quality,measured_at) " +
+                "VALUES (?,?,?,?,?,?,?,'SEEDED',?)", newId(), corporation, site, device, component, value, unit,
+                Timestamp.from(Instant.now()));
         }
 
         private String flow(String corporation, String site) {

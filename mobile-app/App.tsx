@@ -5,13 +5,15 @@ import {Navigator} from './src/navigation/Navigator';
 import type {Route} from './src/navigation/routes';
 import {SessionProvider} from './src/state/SessionContext';
 import {SignInScreen} from './src/screens/SignIn';
-import {OperationsHomeScreen, OperationsSiteScreen} from './src/screens/Operations';
+import {OperationsDeviceScreen, OperationsHomeScreen, OperationsSiteScreen, OperationsZoneScreen} from './src/screens/Operations';
 import {colors} from './src/theme';
 
 function renderRoute(route: Route): React.ReactNode {
   switch (route.name) {
     case 'signin': return <SignInScreen />;
     case 'site': return <OperationsSiteScreen />;
+    case 'zone': return <OperationsZoneScreen />;
+    case 'device': return <OperationsDeviceScreen />;
     case 'home':
     case 'sites':
     default: return <OperationsHomeScreen />;

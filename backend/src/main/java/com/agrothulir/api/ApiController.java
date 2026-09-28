@@ -34,8 +34,11 @@ public class ApiController {
     @GetMapping("/sites") public List<Map<String, Object>> sites(HttpServletRequest request) { return service.sites(context(request)); }
     @GetMapping("/sites/{siteId}") public Map<String, Object> site(HttpServletRequest request, @PathVariable String siteId) { return service.site(context(request), siteId); }
     @GetMapping("/sites/{siteId}/zones") public Object zones(HttpServletRequest request, @PathVariable String siteId) { return service.site(context(request), siteId).get("zones"); }
+    @GetMapping("/zones") public List<Map<String, Object>> zones(HttpServletRequest request) { return service.zones(context(request)); }
+    @GetMapping("/zones/{zoneId}") public Map<String, Object> zone(HttpServletRequest request, @PathVariable String zoneId) { return service.zone(context(request), zoneId); }
 
-    @GetMapping("/devices") public List<Map<String, Object>> devices(HttpServletRequest request, @RequestParam String siteId) { return service.devices(context(request), siteId); }
+    @GetMapping("/devices") public List<Map<String, Object>> devices(HttpServletRequest request, @RequestParam(required=false) String siteId,
+        @RequestParam(required=false) String zoneId) { return service.devices(context(request), siteId, zoneId); }
     @GetMapping("/devices/{deviceId}") public Map<String, Object> device(HttpServletRequest request, @PathVariable String deviceId) { return service.device(context(request), deviceId); }
     @GetMapping("/devices/{deviceId}/capabilities") public Map<String, Object> capabilities(HttpServletRequest request, @PathVariable String deviceId) { return service.capabilities(context(request), deviceId); }
     @GetMapping("/devices/{deviceId}/components") public List<Map<String, Object>> components(HttpServletRequest request, @PathVariable String deviceId) { return service.components(context(request), deviceId); }

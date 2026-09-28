@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kirish Corporation to Component Architecture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f3f7f1, #0b1410);
+      --surface: light-dark(#ffffff, #132019);
+      --surface-2: light-dark(#eaf2e8, #192a20);
+      --surface-3: light-dark(#f7faf6, #101b15);
+      --text: light-dark(#17231b, #edf6ef);
+      --muted: light-dark(#617064, #a8b8ac);
+      --line: light-dark(#ccd9ce, #304338);
+      --green: light-dark(#196b3a, #59d78a);
+      --green-soft: light-dark(#dff2e4, #173525);
+      --blue: light-dark(#2167a3, #65b7f1);
+      --blue-soft: light-dark(#e1eff9, #142e40);
+      --amber: light-dark(#9a5d00, #f3bc55);
+      --amber-soft: light-dark(#fff0cf, #3c2c10);
+      --red: light-dark(#a53a35, #f27b73);
+      --red-soft: light-dark(#fce6e4, #3f201f);
+      --violet: light-dark(#6950a1, #b99cec);
+      --violet-soft: light-dark(#eee8fa, #2b2340);
+      --shadow: 0 18px 50px light-dark(rgba(25, 70, 40, .09), rgba(0, 0, 0, .28));
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 8% 0%, light-dark(rgba(91, 173, 101, .16), rgba(57, 156, 92, .12)), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    button { font: inherit; }
+    .page { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+    .eyebrow { margin: 0 0 10px; color: var(--green); font-size: .76rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 850px; font-size: clamp(2rem, 4vw, 4.25rem); line-height: 1.03; letter-spacing: -.045em; font-weight: 680; }
+    h2 { margin: 0; font-size: clamp(1.35rem, 2vw, 2rem); line-height: 1.15; letter-spacing: -.025em; }
+    h3 { margin: 0; font-size: 1rem; }
+    p { margin: 0; }
+    .lead { max-width: 780px; margin-top: 18px; color: var(--muted); font-size: 1.03rem; }
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+    .stamp { flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .78rem; background: var(--surface); }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 28px; }
+    .summary article { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--surface) 88%, transparent); }
+    .summary strong { display: block; margin-bottom: 4px; font-size: 1rem; }
+    .summary span { color: var(--muted); font-size: .83rem; }
+    .section { margin-top: 64px; }
+    .section-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-end; margin-bottom: 22px; }
+    .section-head p { max-width: 580px; color: var(--muted); font-size: .9rem; }
+
+    .architecture {
+      position: relative;
+      display: grid;
+      grid-template-columns: .9fr 48px 1.05fr 48px 1.25fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .lane { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .lane-title { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .lane-title::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+    .node { position: relative; padding: 17px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
+    .node.primary { border-color: color-mix(in srgb, var(--green) 38%, var(--line)); background: linear-gradient(145deg, var(--surface), var(--green-soft)); }
+    .node.blue { background: linear-gradient(145deg, var(--surface), var(--blue-soft)); }
+    .node.violet { background: linear-gradient(145deg, var(--surface), var(--violet-soft)); }
+    .node .icon { display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 13px; border-radius: 11px; background: var(--surface-2); color: var(--green); font-weight: 800; }
+    .node h3 { margin-bottom: 5px; }
+    .node p { color: var(--muted); font-size: .82rem; }
+    .node ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+    .node li { position: relative; padding-left: 14px; color: var(--muted); font-size: .8rem; }
+    .node li::before { content: ""; position: absolute; left: 0; top: .55em; width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+    .connector { display: grid; place-items: center; min-height: 90px; color: var(--muted); }
+    .connector span { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); font-size: 1.15rem; }
+    .connector small { writing-mode: vertical-rl; margin-top: 8px; color: var(--muted); font-size: .69rem; letter-spacing: .04em; }
+    .site-shell { padding: 18px; border: 1px solid color-mix(in srgb, var(--green) 38%, var(--line)); border-radius: 22px; background: color-mix(in srgb, var(--green-soft) 60%, transparent); }
+    .site-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .site-head span { color: var(--muted); font-size: .78rem; }
+    .controller { padding: 15px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); }
+    .controller-top { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .status { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: .74rem; font-weight: 700; }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 15%, transparent); }
+    .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .channel { padding: 12px; border-radius: 14px; background: var(--surface-3); border: 1px solid var(--line); }
+    .channel b { display: block; margin-bottom: 3px; font-size: .83rem; }
+    .channel span { color: var(--muted); font-size: .74rem; }
+    .channel.sensor b { color: var(--blue); }
+    .channel.output b { color: var(--amber); }
+    .site-note { margin-top: 12px; color: var(--muted); font-size: .77rem; }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px 22px; margin-top: 16px; color: var(--muted); font-size: .78rem; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .legend i { width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+    .legend span:nth-child(2) i { background: var(--blue); }
+    .legend span:nth-child(3) i { background: var(--amber); }
+    .legend span:nth-child(4) i { background: var(--violet); }
+
+    .topology-chain { display: grid; grid-template-columns: repeat(9, auto); align-items: center; justify-content: center; gap: 10px; padding: 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: var(--shadow); }
+    .topology-node { min-width: 135px; padding: 18px 14px; border-radius: 15px; background: var(--green-soft); border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line)); text-align: center; }
+    .topology-node b { display: block; color: var(--green); font-size: .73rem; letter-spacing: .08em; text-transform: uppercase; }
+    .topology-node span { display: block; margin-top: 5px; font-weight: 700; }
+    .topology-arrow { color: var(--muted); font-size: 1.25rem; }
+    .screen-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+    .screen-map { padding: 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+    .screen-map h3 { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 15px; }
+    .screen-map h3 span { color: var(--muted); font-size: .72rem; font-weight: 500; }
+    .screen-flow { display: grid; gap: 8px; }
+    .screen-step { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 12px; border-radius: 12px; background: var(--surface-3); border: 1px solid var(--line); }
+    .screen-step b { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--green-soft); color: var(--green); font-size: .75rem; }
+    .screen-step strong, .screen-step small { display: block; }
+    .screen-step small { margin-top: 3px; color: var(--muted); font-size: .76rem; }
+    .zone-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+    .zone-preview i { padding: 8px; border-radius: 9px; background: var(--surface-2); color: var(--green); font-size: .72rem; font-style: normal; }
+
+    .simulator { padding: 22px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: var(--shadow); }
+    .controls { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-bottom: 22px; }
+    .controls button { min-height: 42px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); color: var(--text); cursor: pointer; }
+    .controls button:hover { border-color: var(--green); }
+    .controls button:focus-visible { outline: 3px solid color-mix(in srgb, var(--green) 35%, transparent); outline-offset: 2px; }
+    .controls .active { background: var(--green); border-color: var(--green); color: light-dark(#fff, #07150c); }
+    .controls .next { margin-left: auto; background: var(--text); color: var(--surface); }
+    .controls button:disabled { cursor: not-allowed; opacity: .45; }
+    .run-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .7fr); gap: 22px; }
+    .flow-rail { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
+    .flow-step { position: relative; padding: 14px 12px; min-height: 120px; border-radius: 15px; border: 1px solid var(--line); background: var(--surface-3); transition: transform .25s ease, border-color .25s ease, background .25s ease; }
+    .flow-step:not(:last-child)::after { content: "→"; position: absolute; right: -13px; top: 48%; z-index: 3; color: var(--muted); font-weight: 800; }
+    .flow-step .num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: .72rem; font-weight: 800; }
+    .flow-step strong { display: block; margin-top: 13px; font-size: .85rem; }
+    .flow-step small { display: block; margin-top: 5px; color: var(--muted); font-size: .74rem; }
+    .flow-step.done { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); background: var(--green-soft); }
+    .flow-step.current { transform: translateY(-4px); border-color: var(--amber); background: var(--amber-soft); }
+    .flow-step.failed { border-color: var(--red); background: var(--red-soft); }
+    .event-log { padding-left: 20px; border-left: 1px solid var(--line); }
+    .event-log h3 { margin-bottom: 12px; }
+    .event-log ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 11px; }
+    .event-log li { display: grid; grid-template-columns: 24px 1fr; gap: 9px; color: var(--muted); font-size: .8rem; }
+    .event-log li b { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: .68rem; }
+    .event-log li.visible { color: var(--text); }
+    .event-log li.visible b { background: var(--green-soft); color: var(--green); }
+    .live-state { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
+    .live-state .label { color: var(--muted); font-size: .78rem; }
+    .state-value { font-weight: 750; }
+    .mini-state { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .78rem; }
+    .mini-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+    .mini-state.on::before { background: var(--green); }
+    .mini-state.wait::before { background: var(--amber); }
+    .mini-state.off::before { background: var(--muted); }
+
+    .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .rule-block { padding: 20px; border-top: 3px solid var(--green); background: var(--surface); box-shadow: var(--shadow); }
+    .rule-block.off { border-color: var(--blue); }
+    .rule-block h3 { margin-bottom: 14px; }
+    .sequence { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .sequence span { padding: 9px 11px; border-radius: 11px; background: var(--surface-2); font-size: .8rem; }
+    .sequence i { color: var(--muted); font-style: normal; }
+    .rule-block p { margin-top: 13px; color: var(--muted); font-size: .8rem; }
+
+    .data-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .data-group { padding: 17px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+    .data-group h3 { margin-bottom: 10px; }
+    .data-group code { display: block; padding: 6px 0; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; }
+    .data-group code + code { border-top: 1px solid var(--line); }
+    .notice { display: flex; gap: 12px; align-items: flex-start; margin-top: 18px; padding: 15px 17px; border-radius: 14px; background: var(--amber-soft); color: var(--text); font-size: .82rem; }
+    .notice b { color: var(--amber); }
+    footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .76rem; }
+
+    @media (max-width: 900px) {
+      .summary { grid-template-columns: 1fr 1fr; }
+      .architecture { grid-template-columns: 1fr; }
+      .connector { min-height: auto; grid-auto-flow: column; justify-content: center; }
+      .connector span { transform: rotate(90deg); }
+      .connector small { writing-mode: initial; margin: 0 0 0 8px; }
+      .run-layout { grid-template-columns: 1fr; }
+      .event-log { padding: 18px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+      .data-grid { grid-template-columns: 1fr 1fr; }
+      .topology-chain { grid-template-columns: 1fr; }
+      .topology-arrow { transform: rotate(90deg); text-align: center; }
+    }
+    @media (max-width: 620px) {
+      .page { width: min(100% - 20px, 1180px); padding-top: 28px; }
+      .topbar, .section-head { display: block; }
+      .stamp { display: inline-block; margin-top: 18px; }
+      .section { margin-top: 46px; }
+      .section-head p { margin-top: 9px; }
+      .summary, .rules, .data-grid, .channels, .screen-grid { grid-template-columns: 1fr; }
+      .simulator { padding: 15px; }
+      .controls .next { margin-left: 0; }
+      .flow-rail { grid-template-columns: 1fr; }
+      .flow-step { min-height: 0; }
+      .flow-step:not(:last-child)::after { content: "↓"; right: auto; left: 49%; top: auto; bottom: -17px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .flow-step { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Kirish / AgroThulir implemented architecture</p>
+          <h1>Corporation to component, with every field action confirmed.</h1>
+          <p class="lead">The canonical hierarchy is corporation → site → zone → device → component. Mobile and web follow the same drill-down, expose the same device operations, and use the same backend flow engine.</p>
+        </div>
+        <span class="stamp">Current backend model · 2026</span>
+      </div>
+      <div class="summary" aria-label="Architecture summary">
+        <article><strong>Strict topology</strong><span>Corporation → site → zone → device → component.</span></article>
+        <article><strong>Edge control</strong><span>One controller exposes hardware channels for many components.</span></article>
+        <article><strong>Safe sequencing</strong><span>ON follows configured order; OFF runs the exact reverse order.</span></article>
+        <article><strong>Closed-loop proof</strong><span>Each command waits for confirmed feedback before the next step.</span></article>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="architecture-title">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">01 · Component architecture</p>
+          <h2 id="architecture-title">Cloud control, site boundary, physical equipment</h2>
+        </div>
+        <p>Access is scoped by corporation and site grants. Device credentials are separate from user sessions.</p>
+      </div>
+
+      <div class="architecture">
+        <div class="lane">
+          <div class="lane-title">People &amp; triggers</div>
+          <article class="node primary">
+            <div class="icon" aria-hidden="true">UI</div>
+            <h3>Admin web &amp; mobile app</h3>
+            <p>Authenticated operators view sites, publish flows, start ON/OFF actions, and review alerts.</p>
+            <ul>
+              <li>Super admin / corporate admin</li>
+              <li>Site manager / operator / viewer</li>
+              <li>Bearer session + site permission checks</li>
+            </ul>
+          </article>
+          <article class="node">
+            <div class="icon" aria-hidden="true">T</div>
+            <h3>Triggers</h3>
+            <p>Manual action is active. Schedule records exist, but an automatic schedule executor is not currently wired to hardware.</p>
+          </article>
+        </div>
+
+        <div class="connector" aria-hidden="true"><span>→</span><small>HTTPS / JSON</small></div>
+
+        <div class="lane">
+          <div class="lane-title">Platform services</div>
+          <article class="node blue">
+            <div class="icon" aria-hidden="true">API</div>
+            <h3>Spring Boot API</h3>
+            <p>Validates tenant, role, flow state, device availability, feedback quality, and idempotency.</p>
+            <ul>
+              <li>Creates a run and ordered run steps</li>
+              <li>Queues only one active command at a time</li>
+              <li>Raises an alert if confirmation times out</li>
+            </ul>
+          </article>
+          <article class="node violet">
+            <div class="icon" aria-hidden="true">DB</div>
+            <h3>PostgreSQL</h3>
+            <p>Persists topology, component state, flows, commands, readings, alerts, sessions, and audit history.</p>
+          </article>
+          <article class="node">
+            <div class="icon" aria-hidden="true">MQ</div>
+            <h3>Device transport boundary</h3>
+            <p>The current device adapter uses authenticated HTTP polling and feedback. MQTT publishing is a future integration point.</p>
+          </article>
+        </div>
+
+        <div class="connector" aria-hidden="true"><span>⇄</span><small>commands / feedback</small></div>
+
+        <div class="lane">
+          <div class="lane-title">Farm / site</div>
+          <div class="site-shell">
+            <div class="site-head">
+              <div><h3>Kirish Farm</h3><span>Corporation → Site → Zone → Device → Component</span></div>
+              <span class="status">ONLINE</span>
+            </div>
+            <div class="controller">
+              <div class="controller-top">
+                <div><strong>North Pump Controller</strong><br><span class="text-muted">AT-8X · North Irrigation zone</span></div>
+                <span class="status">heartbeat</span>
+              </div>
+              <div class="channels">
+                <div class="channel output"><b>DO1 / DI1 · Valve</b><span>OPEN / CLOSED feedback</span></div>
+                <div class="channel output"><b>DO2 / DI2 · Pump</b><span>RUNNING / STOPPED feedback</span></div>
+                <div class="channel sensor"><b>AI1 · Soil moisture</b><span>Measured value + quality + unit</span></div>
+                <div class="channel sensor"><b>AI2 · Pressure</b><span>Measured value + quality + unit</span></div>
+              </div>
+            </div>
+            <p class="site-note">Other supported controllable component kinds: motor, switch, and relay. Sensors may report readings but cannot be flow control steps.</p>
+          </div>
+        </div>
+      </div>
+      <div class="legend" aria-label="Diagram legend">
+        <span><i></i> control and healthy state</span>
+        <span><i></i> telemetry / API</span>
+        <span><i></i> physical output</span>
+        <span><i></i> persisted state</span>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="navigation-title">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">02 · Topology and screens</p>
+          <h2 id="navigation-title">One hierarchy, the same drill-down on mobile and web</h2>
+        </div>
+        <p>The active corporation is selected first. Zones are always grouped beneath their site and are the cards shown on the home page.</p>
+      </div>
+      <div class="topology-chain" aria-label="Canonical farm topology">
+        <div class="topology-node"><b>Corporation</b><span>Kirish Corp</span></div><div class="topology-arrow">→</div>
+        <div class="topology-node"><b>Site</b><span>Kirish Farm</span></div><div class="topology-arrow">→</div>
+        <div class="topology-node"><b>Zone</b><span>North Irrigation</span></div><div class="topology-arrow">→</div>
+        <div class="topology-node"><b>Device</b><span>Pump Controller</span></div><div class="topology-arrow">→</div>
+        <div class="topology-node"><b>Component</b><span>Valve / Motor / Sensor</span></div>
+      </div>
+      <div class="screen-grid">
+        <article class="screen-map">
+          <h3>Mobile app <span>two zone cards per row</span></h3>
+          <div class="screen-flow">
+            <div class="screen-step"><b>1</b><div><strong>Zone home</strong><small>Corporation dropdown, then sites as labels with a two-column zone grid.</small><div class="zone-preview"><i>North Irrigation</i><i>South Field</i><i>Climate House</i><i>Nursery</i></div></div></div>
+            <div class="screen-step"><b>2</b><div><strong>Zone screen</strong><small>Zone totals and a clickable list of assigned devices.</small></div></div>
+            <div class="screen-step"><b>3</b><div><strong>Device screen</strong><small>ON/OFF operations, ordered steps, editable component configuration, arrangement controls, and sensor data table.</small></div></div>
+          </div>
+        </article>
+        <article class="screen-map">
+          <h3>Web app <span>responsive equivalent</span></h3>
+          <div class="screen-flow">
+            <div class="screen-step"><b>1</b><div><strong>Zone workspace</strong><small>Corporation dropdown in the workspace rail; zones grouped and labeled by site.</small></div></div>
+            <div class="screen-step"><b>2</b><div><strong>Zone detail</strong><small>Online, actuator, and sensor totals plus the same device navigation.</small></div></div>
+            <div class="screen-step"><b>3</b><div><strong>Device workspace</strong><small>Protected operation buttons, flow-order editor, component editor/reordering, and device readings.</small></div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="simulator-title">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">03 · Interactive sequence</p>
+          <h2 id="simulator-title">Walk through an operational flow</h2>
+        </div>
+        <p>Choose an action, then advance the flow. The platform never sends step 2 until step 1 is confirmed.</p>
+      </div>
+
+      <div class="simulator">
+        <div class="controls" aria-label="Flow simulator controls">
+          <button type="button" id="run-on" class="active" aria-pressed="true">ON sequence</button>
+          <button type="button" id="run-off" aria-pressed="false">OFF sequence</button>
+          <button type="button" id="reset-run">Reset</button>
+          <button type="button" id="next-step" class="next">Advance one event →</button>
+        </div>
+
+        <div class="run-layout">
+          <div class="flow-rail" id="flow-rail" aria-label="Current command path">
+            <article class="flow-step" data-stage="0"><span class="num">1</span><strong>Request accepted</strong><small>Role, site, flow, state, and idempotency validated</small></article>
+            <article class="flow-step" data-stage="1"><span class="num">2</span><strong>Valve command</strong><small id="valve-action">OPEN → wait for OPEN feedback</small></article>
+            <article class="flow-step" data-stage="2"><span class="num">3</span><strong>Pump command</strong><small id="pump-action">START → wait for RUNNING feedback</small></article>
+            <article class="flow-step" data-stage="3"><span class="num">4</span><strong>Run confirmed</strong><small>End time, history, state, and audit record saved</small></article>
+          </div>
+
+          <aside class="event-log" aria-live="polite">
+            <h3 id="event-title">Ready to start ON</h3>
+            <ol id="event-list">
+              <li><b>1</b><span>API creates the run and its ordered steps.</span></li>
+              <li><b>2</b><span id="event-a">Valve command is queued for DO1.</span></li>
+              <li><b>3</b><span>Controller polls, operates the channel, and posts feedback.</span></li>
+              <li><b>4</b><span id="event-b">After confirmation, pump command is queued for DO2.</span></li>
+              <li><b>5</b><span>Final feedback confirms the run and releases the sequence.</span></li>
+            </ol>
+          </aside>
+        </div>
+
+        <div class="live-state" aria-live="polite">
+          <span class="label">Run:</span><span class="state-value" id="run-state">NOT STARTED</span>
+          <span class="label">Valve:</span><span class="mini-state off" id="valve-state">CLOSED</span>
+          <span class="label">Pump:</span><span class="mini-state off" id="pump-state">STOPPED</span>
+          <span class="label">Next command:</span><span class="state-value" id="next-command">OPEN valve</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="safety-title">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">04 · Operating rules</p>
+          <h2 id="safety-title">The same components, deliberately different order</h2>
+        </div>
+        <p>Reversing shutdown order keeps the pump from running against a closed isolation valve.</p>
+      </div>
+      <div class="rules">
+        <article class="rule-block">
+          <h3>Turn the farm flow ON</h3>
+          <div class="sequence"><span>1 · Valve OPEN</span><i>→ confirm →</i><span>2 · Pump START</span><i>→ confirm</i></div>
+          <p>The next command is created only when the previous component reports the expected state.</p>
+        </article>
+        <article class="rule-block off">
+          <h3>Turn the farm flow OFF</h3>
+          <div class="sequence"><span>1 · Pump STOP</span><i>→ confirm →</i><span>2 · Valve CLOSE</span><i>→ confirm</i></div>
+          <p>OFF walks the configured flow in reverse, using each component's matching shutdown action.</p>
+        </article>
+      </div>
+      <div class="notice"><b>Failure behavior</b><span>A command expires after 45 seconds if feedback does not confirm the expected state. The run and step are marked timed out and a critical site alert is raised. Devices with no recent feedback are marked offline after 120 seconds.</span></div>
+    </section>
+
+    <section class="section" aria-labelledby="data-title">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">05 · Persisted model</p>
+          <h2 id="data-title">What the platform remembers</h2>
+        </div>
+        <p>Every record carries tenant and site context so operations remain isolated and auditable.</p>
+      </div>
+      <div class="data-grid">
+        <article class="data-group"><h3>Physical topology</h3><code>corporation → site → zone</code><code>zone → device → component</code><code>component → hardware channel + display_order</code></article>
+        <article class="data-group"><h3>Control definition</h3><code>flow → ordered flow_steps</code><code>schedule → target flow version</code><code>site_grant → user permission</code></article>
+        <article class="data-group"><h3>Execution trail</h3><code>run → flow_run_steps</code><code>step → command → outbox event</code><code>feedback → state / reading / audit</code></article>
+        <article class="data-group"><h3>Pre-seeded example</h3><code>2 sites → 4 zones → 4 devices</code><code>valves + pump + motor + relay + switch</code><code>temperature + humidity + moisture + pressure</code></article>
+      </div>
+    </section>
+
+    <footer>Source of truth: the current Kirish Spring Boot services and UUID database migrations. This diagram reflects the implemented HTTP device-ingest path; broker publishing remains an integration boundary.</footer>
+  </main>
+
+  <script>
+    (() => {
+      const sequences = {
+        on: {
+          initial: { valve: 'CLOSED', pump: 'STOPPED' },
+          valveText: 'OPEN → wait for OPEN feedback',
+          pumpText: 'START → wait for RUNNING feedback',
+          eventA: 'Valve OPEN command is queued for DO1.',
+          eventB: 'After OPEN is confirmed, pump START is queued for DO2.',
+          next: ['create run', 'OPEN valve', 'confirm valve', 'START pump', 'confirm pump', 'complete'],
+          states: [
+            ['ACCEPTED', 'CLOSED', 'STOPPED'],
+            ['WAITING_FEEDBACK', 'OPENING', 'STOPPED'],
+            ['WAITING_FEEDBACK', 'OPEN', 'STOPPED'],
+            ['WAITING_FEEDBACK', 'OPEN', 'STARTING'],
+            ['WAITING_FEEDBACK', 'OPEN', 'RUNNING'],
+            ['CONFIRMED', 'OPEN', 'RUNNING']
+          ]
+        },
+        off: {
+          initial: { valve: 'OPEN', pump: 'RUNNING' },
+          valveText: 'CLOSE → wait for CLOSED feedback',
+          pumpText: 'STOP → wait for STOPPED feedback',
+          eventA: 'Pump STOP command is queued first for DO2.',
+          eventB: 'After STOPPED is confirmed, valve CLOSE is queued for DO1.',
+          next: ['create run', 'STOP pump', 'confirm pump', 'CLOSE valve', 'confirm valve', 'complete'],
+          states: [
+            ['ACCEPTED', 'OPEN', 'RUNNING'],
+            ['WAITING_FEEDBACK', 'OPEN', 'STOPPING'],
+            ['WAITING_FEEDBACK', 'OPEN', 'STOPPED'],
+            ['WAITING_FEEDBACK', 'CLOSING', 'STOPPED'],
+            ['WAITING_FEEDBACK', 'CLOSED', 'STOPPED'],
+            ['CONFIRMED', 'CLOSED', 'STOPPED']
+          ]
+        }
+      };
+
+      const onButton = document.getElementById('run-on');
+      const offButton = document.getElementById('run-off');
+      const resetButton = document.getElementById('reset-run');
+      const nextButton = document.getElementById('next-step');
+      const runState = document.getElementById('run-state');
+      const valveState = document.getElementById('valve-state');
+      const pumpState = document.getElementById('pump-state');
+      const nextCommand = document.getElementById('next-command');
+      const eventTitle = document.getElementById('event-title');
+      const steps = [...document.querySelectorAll('.flow-step')];
+      const events = [...document.querySelectorAll('#event-list li')];
+      let mode = 'on';
+      let cursor = -1;
+
+      function stateClass(value) {
+        if (['OPEN', 'RUNNING', 'CONFIRMED'].includes(value)) return 'on';
+        if (['OPENING', 'STARTING', 'STOPPING', 'CLOSING', 'WAITING_FEEDBACK', 'ACCEPTED'].includes(value)) return 'wait';
+        return 'off';
+      }
+
+      function setStatus(element, value) {
+        element.textContent = value;
+        element.className = `mini-state ${stateClass(value)}`;
+      }
+
+      function configure(nextMode) {
+        mode = nextMode;
+        cursor = -1;
+        const data = sequences[mode];
+        onButton.classList.toggle('active', mode === 'on');
+        offButton.classList.toggle('active', mode === 'off');
+        onButton.setAttribute('aria-pressed', String(mode === 'on'));
+        offButton.setAttribute('aria-pressed', String(mode === 'off'));
+        document.getElementById('valve-action').textContent = mode === 'on' ? data.valveText : data.pumpText;
+        document.getElementById('pump-action').textContent = mode === 'on' ? data.pumpText : data.valveText;
+        document.getElementById('event-a').textContent = data.eventA;
+        document.getElementById('event-b').textContent = data.eventB;
+        eventTitle.textContent = `Ready to start ${mode.toUpperCase()}`;
+        runState.textContent = 'NOT STARTED';
+        setStatus(valveState, data.initial.valve);
+        setStatus(pumpState, data.initial.pump);
+        nextCommand.textContent = data.next[1];
+        nextButton.disabled = false;
+        steps.forEach(step => step.className = 'flow-step');
+        events.forEach(event => event.classList.remove('visible'));
+      }
+
+      function advance() {
+        const data = sequences[mode];
+        if (cursor >= data.states.length - 1) return;
+        cursor += 1;
+        const [run, valve, pump] = data.states[cursor];
+        runState.textContent = run;
+        setStatus(valveState, valve);
+        setStatus(pumpState, pump);
+        nextCommand.textContent = data.next[Math.min(cursor + 1, data.next.length - 1)];
+        eventTitle.textContent = cursor === data.states.length - 1 ? `${mode.toUpperCase()} flow confirmed` : `Event ${cursor + 1} of ${data.states.length}`;
+        events.forEach((event, index) => event.classList.toggle('visible', index <= Math.max(0, cursor - 1)));
+        const visualStage = cursor === 0 ? 0 : cursor <= 2 ? 1 : cursor <= 4 ? 2 : 3;
+        steps.forEach((step, index) => {
+          step.classList.toggle('done', index < visualStage || cursor === data.states.length - 1);
+          step.classList.toggle('current', index === visualStage && cursor < data.states.length - 1);
+        });
+        nextButton.disabled = cursor === data.states.length - 1;
+      }
+
+      onButton.addEventListener('click', () => configure('on'));
+      offButton.addEventListener('click', () => configure('off'));
+      resetButton.addEventListener('click', () => configure(mode));
+      nextButton.addEventListener('click', advance);
+      configure('on');
+    })();
+  </script>
+</body>
+</html>

@@ -1,10 +1,10 @@
 import {useCallback, useEffect, useMemo, useState, type FormEvent} from 'react';
 import {ArrowDown, ArrowUp, Check, Cpu, GitBranch, Plus, RefreshCw, Trash2, X} from 'lucide-react';
-import {api, type Device, type OperationalFlow, type OperationalFlowDetail, type Site, type SiteComponent} from './api';
+import {api, type Device, type OperationalFlow, type OperationalFlowDetail, type Site, type SiteComponent, type Zone} from './api';
 
-type Props = {site: Site; devices: Device[]; canManage: boolean; onChanged: () => void; onClose: () => void};
+type Props = {site: Site; devices: Device[]; zones: Zone[]; canManage: boolean; onChanged: () => void; onClose: () => void};
 
-export default function SiteFlowManager({site, devices, canManage, onChanged, onClose}: Props) {
+export default function SiteFlowManager({site, devices, zones, canManage, onChanged, onClose}: Props) {
   const [flows, setFlows] = useState<OperationalFlowDetail[]>([]);
   const [components, setComponents] = useState<SiteComponent[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -14,6 +14,9 @@ export default function SiteFlowManager({site, devices, canManage, onChanged, on
   const [deviceName, setDeviceName] = useState('');
   const [deviceSerial, setDeviceSerial] = useState('');
   const [deviceModel, setDeviceModel] = useState('');
+  const siteZones = useMemo(() => zones.filter(zone => zone.site_id === site.id), [zones, site.id]);
+  const [deviceZone, setDeviceZone] = useState(() => siteZones[0]?.id ?? '');
+  const [zoneName, setZoneName] = useState('');
   const [componentDevice, setComponentDevice] = useState('');
   const [componentKind, setComponentKind] = useState('VALVE');
   const [componentName, setComponentName] = useState('');
@@ -67,10 +70,18 @@ export default function SiteFlowManager({site, devices, canManage, onChanged, on
   async function createDevice(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
-      await api('/v1/admin/devices', {method: 'POST', body: {siteId: site.id, name: deviceName, serial: deviceSerial, model: deviceModel}});
+      await api('/v1/admin/devices', {method: 'POST', body: {siteId: site.id, zoneId: deviceZone, name: deviceName, serial: deviceSerial, model: deviceModel}});
       setDeviceName(''); setDeviceSerial(''); setDeviceModel(''); setNotice('Device registered. Add its components below.');
       onChanged(); setRevision(value => value + 1);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not register the device.'); }
+    finally { setBusy(false); }
+  }
+  async function createZone(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError(''); setNotice('');
+    try {
+      await api(`/v1/admin/sites/${site.id}/zones`, {method: 'POST', body: {name: zoneName}});
+      setZoneName(''); setNotice('Zone created.'); onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create the zone.'); }
     finally { setBusy(false); }
   }
   async function createComponent(event: FormEvent) {
@@ -110,7 +121,8 @@ export default function SiteFlowManager({site, devices, canManage, onChanged, on
       <div className="flow-section-title"><Cpu size={18} /><h3>Site devices & components</h3></div>
       {siteDevices.map(device => <div className="flow-device" key={device.id}><strong>{device.name}</strong><small>{device.serial ?? device.id} · {device.status}</small><div>{components.filter(component => component.device_id === device.id).map(component => <span key={component.id}>{component.name} <b>{component.kind}</b></span>)}</div></div>)}
       {siteDevices.length === 0 && <p className="flow-muted">No devices registered at this site.</p>}
-      {canManage && <><form className="flow-form" onSubmit={createDevice}><div className="flow-section-title"><Plus size={18} /><h3>Register device</h3></div><label>Device name<input value={deviceName} onChange={event => setDeviceName(event.target.value)} required /></label><label>Serial number<input value={deviceSerial} onChange={event => setDeviceSerial(event.target.value)} required /></label><label>Model<input value={deviceModel} onChange={event => setDeviceModel(event.target.value)} required /></label><button className="primary" disabled={busy}>Register device</button></form>
+      {canManage && <form className="flow-form" onSubmit={createZone}><div className="flow-section-title"><Plus size={18} /><h3>Add zone</h3></div><label>Zone name<input value={zoneName} onChange={event => setZoneName(event.target.value)} required placeholder="e.g. North irrigation" /></label><button className="primary" disabled={busy}>Create zone</button></form>}
+      {canManage && <><form className="flow-form" onSubmit={createDevice}><div className="flow-section-title"><Plus size={18} /><h3>Register device</h3></div><label>Zone<select value={deviceZone} onChange={event => setDeviceZone(event.target.value)} required><option value="">Choose zone</option>{siteZones.map(zone => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</select></label><label>Device name<input value={deviceName} onChange={event => setDeviceName(event.target.value)} required /></label><label>Serial number<input value={deviceSerial} onChange={event => setDeviceSerial(event.target.value)} required /></label><label>Model<input value={deviceModel} onChange={event => setDeviceModel(event.target.value)} required /></label><button className="primary" disabled={busy || !deviceZone}>Register device</button></form>
         <form className="flow-form" onSubmit={createComponent}><div className="flow-section-title"><Plus size={18} /><h3>Add device component</h3></div><label>Device<select value={componentDevice} onChange={event => setComponentDevice(event.target.value)} required><option value="">Select device</option>{siteDevices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label><label>Component type<select value={componentKind} onChange={event => setComponentKind(event.target.value)}>{['VALVE', 'MOTOR', 'PUMP', 'SWITCH', 'RELAY', 'SENSOR'].map(kind => <option key={kind}>{kind}</option>)}</select></label><label>Component name<input value={componentName} onChange={event => setComponentName(event.target.value)} required /></label><label>Hardware channel<input value={hardwareChannel} onChange={event => setHardwareChannel(event.target.value)} required placeholder="e.g. valve-1" /></label><button className="primary" disabled={busy || !componentDevice}>Add component</button></form></>}
     </div></div>
   </section>;

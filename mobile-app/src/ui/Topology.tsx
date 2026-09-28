@@ -25,8 +25,8 @@ function levelsOf(data: TopologyData): string[][] {
   const incoming = new Map<string, number>();
   const outgoing = new Map<string, string[]>();
   data.nodes.forEach(node => {
-    incoming.set(node, 0);
-    outgoing.set(node, []);
+    incoming.set(node.id, 0);
+    outgoing.set(node.id, []);
   });
   data.connections.forEach(connection => {
     if (!incoming.has(connection.to)) {
@@ -62,7 +62,7 @@ function levelsOf(data: TopologyData): string[][] {
 
   // Anything left is part of a cycle the service reported; show it rather than drop it.
   const placed = new Set(levels.flat());
-  const orphans = data.nodes.filter(node => !placed.has(node));
+  const orphans = data.nodes.map(node => node.id).filter(id => !placed.has(id));
   if (orphans.length > 0) {
     levels.push(orphans);
   }

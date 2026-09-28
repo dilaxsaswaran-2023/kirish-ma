@@ -51,7 +51,18 @@ export type Site = {
   permission_profile?: string;
 };
 
-export type Zone = {id: string; name: string};
+export type Zone = {
+  id: string;
+  site_id: string;
+  name: string;
+  site_name?: string;
+  location?: string | null;
+  health?: SiteHealth;
+  device_count: number;
+  online_count: number | null;
+};
+
+export type ZoneDetail = Zone & {site_name: string; devices: Device[]};
 
 export type SiteDetail = Site & {
   zones: Zone[];
@@ -63,6 +74,8 @@ export type DeviceStatus = 'ONLINE' | 'OFFLINE' | string;
 export type Device = {
   id: string;
   site_id: string;
+  zone_id: string;
+  zone_name?: string;
   name: string;
   model: string;
   firmware: string | null;
@@ -86,9 +99,10 @@ export type DeviceComponent = {
   latest_value: string | null;
   state_version: number;
   measured_at: string | null;
+  display_order: number;
 };
 
-export type DeviceDetail = Device & {serial: string; components: DeviceComponent[]};
+export type DeviceDetail = Device & {serial: string; site_name: string; zone_name: string; components: DeviceComponent[]};
 
 export type Capabilities = {
   deviceId: string;
@@ -107,11 +121,12 @@ export type Diagnostics = {
 };
 
 export type TopologyConnection = {from: string; to: string; type: string};
+export type TopologyNode = {id: string; type: 'CORPORATION' | 'SITE' | 'ZONE' | 'DEVICE' | 'COMPONENT'; name: string; kind?: string};
 
 export type Topology = {
   siteId: string;
   status: string;
-  nodes: string[];
+  nodes: TopologyNode[];
   connections: TopologyConnection[];
 };
 

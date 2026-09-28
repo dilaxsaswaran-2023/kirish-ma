@@ -27,17 +27,29 @@ public class AdminController {
     @PostMapping("/sites") public Map<String, Object> site(HttpServletRequest request, @Valid @RequestBody SiteInput input) {
         return admin.createSite(context(request), input.name(), input.type(), input.location());
     }
+    @PostMapping("/sites/{siteId}/zones") public Map<String, Object> zone(HttpServletRequest request,
+        @PathVariable String siteId, @Valid @RequestBody ZoneInput input) {
+        return admin.createZone(context(request), siteId, input.name());
+    }
     @PostMapping("/devices") public Map<String, Object> device(HttpServletRequest request, @Valid @RequestBody DeviceInput input) {
-        return admin.createDevice(context(request), input.siteId(), input.serial(), input.name(), input.model());
+        return admin.createDevice(context(request), input.siteId(), input.zoneId(), input.serial(), input.name(), input.model());
     }
     @PostMapping("/devices/{deviceId}/components") public Map<String, Object> component(HttpServletRequest request,
         @PathVariable String deviceId, @Valid @RequestBody ComponentInput input) {
         return admin.createComponent(context(request), deviceId, input.kind().toUpperCase(), input.name(), input.hardwareChannel());
     }
+    @PutMapping("/components/{componentId}") public Map<String, Object> updateComponent(HttpServletRequest request,
+        @PathVariable String componentId, @Valid @RequestBody ComponentUpdateInput input) {
+        return admin.updateComponent(context(request), componentId, input.kind().toUpperCase(), input.name(),
+            input.hardwareChannel(), input.displayOrder());
+    }
 
     public record UserInput(@NotBlank @Email String email, @NotBlank String displayName,
         @NotBlank @Size(min=8) String password, @NotBlank String role, String siteId) {}
     public record SiteInput(@NotBlank String name, @NotBlank String type, @NotBlank String location) {}
-    public record DeviceInput(@NotBlank String siteId, @NotBlank String serial, @NotBlank String name, @NotBlank String model) {}
+    public record ZoneInput(@NotBlank String name) {}
+    public record DeviceInput(@NotBlank String siteId, @NotBlank String zoneId, @NotBlank String serial, @NotBlank String name, @NotBlank String model) {}
     public record ComponentInput(@NotBlank String kind, @NotBlank String name, @NotBlank String hardwareChannel) {}
+    public record ComponentUpdateInput(@NotBlank String kind, @NotBlank String name,
+        @NotBlank String hardwareChannel, int displayOrder) {}
 }

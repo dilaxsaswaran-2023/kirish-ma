@@ -61,16 +61,30 @@ public class AdminService {
     }
 
     @Transactional
-    public Map<String, Object> createDevice(TenantContext context, String siteId, String serial, String name, String model) {
+    public Map<String, Object> createZone(TenantContext context, String siteId, String name) {
         if (!context.canManage()) throw new ApiException(HttpStatus.FORBIDDEN, "MANAGE_FORBIDDEN", "Site management access is required.");
         requireSite(context, siteId);
+        String id = UUID.randomUUID().toString();
+        jdbc.update("INSERT INTO zones(id,corporation_id,site_id,name) VALUES (?,?,?,?)",
+            id, context.corporationId(), siteId, name);
+        audit(context, "ZONE_CREATED", id, name);
+        return Map.of("id", id, "site_id", siteId, "name", name);
+    }
+
+    @Transactional
+    public Map<String, Object> createDevice(TenantContext context, String siteId, String zoneId, String serial, String name, String model) {
+        if (!context.canManage()) throw new ApiException(HttpStatus.FORBIDDEN, "MANAGE_FORBIDDEN", "Site management access is required.");
+        requireSite(context, siteId);
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM zones WHERE id=? AND site_id=? AND corporation_id=?", Long.class,
+            zoneId, siteId, context.corporationId()) == 0)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ZONE_REQUIRED", "Choose a zone that belongs to this site.");
         if (jdbc.queryForObject("SELECT COUNT(*) FROM devices WHERE serial=?", Long.class, serial) > 0)
             throw new ApiException(HttpStatus.CONFLICT, "SERIAL_EXISTS", "This serial is already registered.");
         String id = UUID.randomUUID().toString();
-        jdbc.update("INSERT INTO devices(id,corporation_id,site_id,serial,name,model,status) VALUES (?,?,?,?,?,?,'OFFLINE')",
-            id, context.corporationId(), siteId, serial, name, model);
+        jdbc.update("INSERT INTO devices(id,corporation_id,site_id,zone_id,serial,name,model,status) VALUES (?,?,?,?,?,?,?,'OFFLINE')",
+            id, context.corporationId(), siteId, zoneId, serial, name, model);
         audit(context, "DEVICE_REGISTERED", id, serial);
-        return Map.of("id", id, "site_id", siteId, "serial", serial, "name", name, "model", model, "status", "OFFLINE");
+        return Map.of("id", id, "site_id", siteId, "zone_id", zoneId, "serial", serial, "name", name, "model", model, "status", "OFFLINE");
     }
 
     @Transactional
@@ -85,10 +99,33 @@ public class AdminService {
         Long existing = jdbc.queryForObject("SELECT COUNT(*) FROM components WHERE device_id=? AND hardware_channel=?", Long.class, deviceId, channel);
         if (existing != null && existing > 0) throw new ApiException(HttpStatus.CONFLICT, "CHANNEL_EXISTS", "This hardware channel is already registered.");
         String id = UUID.randomUUID().toString();
-        jdbc.update("INSERT INTO components(id,corporation_id,site_id,device_id,kind,name,hardware_channel,feedback_quality) " +
-            "VALUES (?,?,?,?,?,?,?,'UNKNOWN')", id, context.corporationId(), siteId, deviceId, kind, name, channel);
+        Integer nextOrder = jdbc.queryForObject("SELECT COALESCE(MAX(display_order),0)+1 FROM components WHERE device_id=?", Integer.class, deviceId);
+        jdbc.update("INSERT INTO components(id,corporation_id,site_id,device_id,kind,name,hardware_channel,feedback_quality,display_order) " +
+            "VALUES (?,?,?,?,?,?,?,'UNKNOWN',?)", id, context.corporationId(), siteId, deviceId, kind, name, channel, nextOrder);
         audit(context, "COMPONENT_REGISTERED", id, name);
-        return Map.of("id", id, "device_id", deviceId, "kind", kind, "name", name, "hardware_channel", channel);
+        return Map.of("id", id, "device_id", deviceId, "kind", kind, "name", name, "hardware_channel", channel,
+            "display_order", nextOrder == null ? 1 : nextOrder);
+    }
+
+    @Transactional
+    public Map<String, Object> updateComponent(TenantContext context, String componentId, String kind, String name,
+        String channel, int displayOrder) {
+        if (!context.canManage()) throw new ApiException(HttpStatus.FORBIDDEN, "MANAGE_FORBIDDEN", "Site management access is required.");
+        if (!List.of("VALVE", "PUMP", "MOTOR", "SWITCH", "RELAY", "SENSOR").contains(kind))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "COMPONENT_KIND", "Choose a supported component type.");
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT site_id,device_id FROM components WHERE id=? AND corporation_id=?",
+            componentId, context.corporationId());
+        if (rows.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "Component was not found in this corporation.");
+        requireSite(context, rows.get(0).get("site_id").toString());
+        Long duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM components WHERE device_id=? AND hardware_channel=? AND id<>?",
+            Long.class, rows.get(0).get("device_id"), channel, componentId);
+        if (duplicate != null && duplicate > 0)
+            throw new ApiException(HttpStatus.CONFLICT, "CHANNEL_EXISTS", "This hardware channel is already registered.");
+        jdbc.update("UPDATE components SET kind=?,name=?,hardware_channel=?,display_order=? WHERE id=? AND corporation_id=?",
+            kind, name, channel, Math.max(0, displayOrder), componentId, context.corporationId());
+        audit(context, "COMPONENT_UPDATED", componentId, name);
+        return Map.of("id", componentId, "kind", kind, "name", name, "hardware_channel", channel,
+            "display_order", Math.max(0, displayOrder));
     }
 
     private void requireCorporate(TenantContext context) {

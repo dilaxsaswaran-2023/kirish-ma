@@ -1,9 +1,8 @@
-import React, {useCallback, useState} from 'react';
-import {Alert as NativeAlert, Pressable, StyleSheet, Text, View} from 'react-native';
-import {getDevices, getOperationalFlow, getOperationalFlows, getOperationalRun, getSite,
-  getSiteAlerts, getSiteHistory, getSiteReadings, getSiteSchedules, operateFlow} from '../api/endpoints';
-import type {Alert, Device, OperationalFlowDetail, OperationalHistory, OperationalRun, Schedule,
-  SensorReading, SiteDetail} from '../api/types';
+import React, {useCallback, useMemo, useState} from 'react';
+import {Alert as NativeAlert, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {getDevice, getOperationalFlow, getOperationalFlows, getSite, getSiteReadings, getZone, getZones,
+  operateFlow, updateComponent, updateOperationalFlow} from '../api/endpoints';
+import type {DeviceComponent, DeviceDetail, OperationalFlowDetail, SensorReading, SiteDetail, Zone, ZoneDetail} from '../api/types';
 import {Icon, type IconName} from '../icons';
 import {useNavigation, useParams} from '../navigation/Navigator';
 import {useResource} from '../state/useResource';
@@ -14,194 +13,178 @@ import {Loading} from '../ui/StateViews';
 
 const titleCase = (value: string) => value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 const when = (value?: string | null) => value ? new Date(value).toLocaleString() : 'Not recorded';
+const componentIcon = (kind: string): IconName => kind === 'VALVE' ? 'valve' : kind === 'SENSOR' ? 'sensor' : 'motor';
 
 function Section({icon, title, children}: {icon: IconName; title: string; children: React.ReactNode}) {
-  return <View style={styles.section}><View style={styles.sectionTitle}><Icon name={icon} size={21} />
-    <Text style={styles.heading}>{title}</Text></View>{children}</View>;
+  return <View style={styles.section}><View style={styles.sectionTitle}><Icon name={icon} size={21} /><Text style={styles.heading}>{title}</Text></View>{children}</View>;
 }
-
-function Line({icon, title, subtitle, state}: {icon: IconName; title: string; subtitle?: string; state?: string}) {
-  return <View style={styles.line}><View style={styles.lineIcon}><Icon name={icon} size={22} /></View>
-    <View style={styles.lineCopy}><Text style={styles.lineTitle}>{title}</Text>
-      {subtitle ? <Text style={styles.muted}>{subtitle}</Text> : null}</View>
-    {state ? <Text style={styles.state}>{titleCase(state)}</Text> : null}</View>;
-}
-
 function Empty({message}: {message: string}) { return <Text style={styles.empty}>{message}</Text>; }
+function ErrorText({message}: {message: string}) { return <Text style={styles.error}>{message}</Text>; }
 
-export function OperationsHomeScreen() {
-  const navigation = useNavigation();
+function CorporationPicker() {
   const session = useSession();
-  const [corporationOpen, setCorporationOpen] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [filterSiteId, setFilterSiteId] = useState('ALL');
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const active = session.workspaces.find(space => space.id === session.me?.activeCorporationId) ?? session.workspaces[0];
-  const shown = filterSiteId === 'ALL' ? session.sites : session.sites.filter(site => site.id === filterSiteId);
-
-  return <Screen title="My sites" subtitle="Choose a site to operate its device flows." hideBack showTabs={false}
-    onRefresh={() => void session.refreshSites()} refreshing={session.connecting}>
-    <View style={styles.intro}><Icon name="power" color={colors.white} size={34} />
-      <Text style={styles.introTitle}>Device control</Text><Text style={styles.introCopy}>Your assigned sites and operational flows, in one place.</Text></View>
-    <Section icon="home" title="Corporation">
-      <Pressable style={styles.picker} onPress={() => setCorporationOpen(!corporationOpen)} accessibilityRole="button"
-        accessibilityLabel="Choose corporation"><Icon name="home" size={22} /><Text style={styles.pickerText}>{active?.name ?? 'No corporation'}</Text>
-        <Icon name="reorder" size={20} /></Pressable>
-      {corporationOpen && session.workspaces.map(space => <Pressable key={space.id} style={styles.option}
-        onPress={async () => {setCorporationOpen(false); setError(''); try {await session.selectCorporation(space.id); setFilterSiteId('ALL');}
-          catch (cause) {setError(cause instanceof Error ? cause.message : 'Could not switch corporation.');}}}>
-        <Text style={styles.optionText}>{space.name}</Text>{space.id === active?.id ? <Icon name="check" size={19} /> : null}</Pressable>)}
-      {session.connecting ? <Loading label="Switching corporation…" /> : null}
-    </Section>
-    <Section icon="pin" title={`Sites (${session.sites.length})`}>
-      <Pressable style={styles.picker} onPress={() => setFilterOpen(!filterOpen)} accessibilityRole="button"
-        accessibilityLabel="Filter sites"><Icon name="pin" size={22} />
-        <Text style={styles.pickerText}>{filterSiteId === 'ALL' ? 'All sites' : session.sites.find(site => site.id === filterSiteId)?.name ?? 'All sites'}</Text>
-        <Icon name="reorder" size={20} /></Pressable>
-      {filterOpen && [{id: 'ALL', name: 'All sites'}, ...session.sites].map(site => <Pressable key={site.id} style={styles.option}
-        onPress={() => {setFilterSiteId(site.id); setFilterOpen(false);}}><Text style={styles.optionText}>{site.name}</Text>
-        {site.id === filterSiteId ? <Icon name="check" size={19} /> : null}</Pressable>)}
-      {shown.length === 0 ? <Empty message="No sites are assigned in this corporation." /> : shown.map(site =>
-        <Pressable key={site.id} style={styles.siteCard} accessibilityRole="button" accessibilityLabel={`Open ${site.name}`}
-          onPress={() => {session.selectSite(site.id); navigation.navigate('site', {siteId: site.id});}}>
-          <View style={styles.siteIcon}><Icon name={site.type === 'GREENHOUSE' ? 'leaf' : 'pin'} size={29} /></View>
-          <View style={styles.siteCopy}><Text style={styles.siteTitle}>{site.name}</Text>
-            <Text style={styles.muted}>{site.location ?? site.timezone} · {titleCase(site.health)}</Text></View>
-          <Icon name="next" size={22} /></Pressable>)}
-    </Section>
-    {error ? <Text style={styles.error}>{error}</Text> : null}
-    <Pressable style={styles.signOut} onPress={() => {session.signOut(); navigation.reset('signin');}}>
-      <Icon name="lock" size={18} /><Text style={styles.muted}>Sign out</Text></Pressable>
-  </Screen>;
+  return <Section icon="home" title="Corporation">
+    <Pressable style={styles.picker} onPress={() => setOpen(value => !value)} accessibilityRole="button">
+      <Icon name="home" size={22} /><Text style={styles.pickerText}>{active?.name ?? 'No corporation'}</Text><Icon name="reorder" size={20} />
+    </Pressable>
+    {open && session.workspaces.map(space => <Pressable key={space.id} style={styles.option} onPress={async () => {
+      setOpen(false); setError('');
+      try { await session.selectCorporation(space.id); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not switch corporation.'); }
+    }}><Text style={styles.optionText}>{space.name}</Text>{space.id === active?.id ? <Icon name="check" size={19} /> : null}</Pressable>)}
+    {error ? <ErrorText message={error} /> : null}
+  </Section>;
 }
 
-type SiteDashboard = {site: SiteDetail; flows: OperationalFlowDetail[]; devices: Device[]; schedules: Schedule[];
-  history: OperationalHistory[]; readings: SensorReading[]; alerts: Alert[]};
+function ZoneGrid({zones}: {zones: Zone[]}) {
+  const navigation = useNavigation();
+  return <View style={styles.zoneGrid}>{zones.map(zone => <Pressable key={zone.id} style={styles.zoneCard}
+    accessibilityRole="button" accessibilityLabel={`Open ${zone.name}`} onPress={() => navigation.navigate('zone', {zoneId: zone.id})}>
+    <View style={styles.zoneIcon}><Icon name="pin" size={25} /></View><Text style={styles.zoneTitle}>{zone.name}</Text>
+    <Text style={styles.zoneMeta}>{zone.device_count ?? 0} devices</Text><View style={styles.zoneStatus}>
+      <View style={[styles.dot, (zone.online_count ?? 0) > 0 ? styles.dotOnline : styles.dotOffline]} />
+      <Text style={styles.zoneStatusText}>{zone.online_count ?? 0} online</Text></View>
+  </Pressable>)}</View>;
+}
+
+export function OperationsHomeScreen() {
+  const session = useSession();
+  const navigation = useNavigation();
+  const zones = useResource<Zone[]>(useCallback(() => getZones(), []), [session.me?.activeCorporationId], {pollMs: 20000});
+  const groups = useMemo(() => session.sites.map(site => ({site, zones: (zones.data ?? []).filter(zone => zone.site_id === site.id)})), [session.sites, zones.data]);
+  return <Screen title="Zones" subtitle="Choose a zone to view its devices." hideBack showTabs={false} onRefresh={zones.reload} refreshing={zones.refreshing}>
+    <View style={styles.intro}><Icon name="leaf" color={colors.white} size={34} /><Text style={styles.introTitle}>Farm operations</Text>
+      <Text style={styles.introCopy}>Corporation → site → zone → device → component</Text></View>
+    <CorporationPicker />
+    {zones.loading ? <Loading label="Reading zones…" /> : null}
+    {zones.error && !zones.data ? <ErrorText message={zones.error.message} /> : null}
+    {groups.map(({site, zones: siteZones}) => <Section key={site.id} icon={site.type === 'GREENHOUSE' ? 'leaf' : 'pin'} title={site.name}>
+      <Text style={styles.groupMeta}>{site.location ?? site.timezone} · {titleCase(site.health)}</Text>
+      {siteZones.length ? <ZoneGrid zones={siteZones} /> : <Empty message="No zones have been configured for this site." />}
+    </Section>)}
+    <Pressable style={styles.signOut} onPress={() => {session.signOut(); navigation.reset('signin');}}><Icon name="lock" size={18} /><Text style={styles.muted}>Sign out</Text></Pressable>
+  </Screen>;
+}
 
 export function OperationsSiteScreen() {
   const {siteId} = useParams<'site'>();
-  const session = useSession();
-  const [busyFlowId, setBusyFlowId] = useState<string | null>(null);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const load = useCallback(async (): Promise<SiteDashboard> => {
-    const [site, flowRows, devices, schedules, history, readings, alerts] = await Promise.all([
-      getSite(siteId), getOperationalFlows(siteId), getDevices(siteId), getSiteSchedules(siteId),
-      getSiteHistory(siteId), getSiteReadings(siteId), getSiteAlerts(siteId)]);
-    const flows = await Promise.all(flowRows.map(flow => getOperationalFlow(flow.id)));
-    return {site, flows, devices, schedules, history, readings, alerts};
-  }, [siteId]);
-  const dashboard = useResource<SiteDashboard>(load, [siteId, session.me?.activeCorporationId], {pollMs: 15000});
-  const run = useResource<OperationalRun>(() => getOperationalRun(activeRunId!), [activeRunId],
-    {enabled: Boolean(activeRunId), pollMs: 5000});
-
-  const requestAction = (flow: OperationalFlowDetail, action: 'ON' | 'OFF') => {
-    const order = action === 'ON' ? flow.steps : [...flow.steps].reverse();
-    NativeAlert.alert(`${action === 'ON' ? 'Turn on' : 'Turn off'} ${flow.name}?`,
-      `${order.map(step => step.component_name).join(' → ')}. Each step waits for device confirmation.`, [
-        {text: 'Cancel', style: 'cancel'},
-        {text: 'Request', onPress: async () => {
-          setBusyFlowId(flow.id); setError('');
-          try {const receipt = await operateFlow(flow.id, action); setActiveRunId(receipt.id); await dashboard.reload();}
-          catch (cause) {setError(cause instanceof Error ? cause.message : 'The operation was refused.');}
-          finally {setBusyFlowId(null);}
-        }},
-      ]);
-  };
-
-  if (!dashboard.data) return <Screen title="Site" subtitle="Loading operations" showTabs={false}>
-    {dashboard.loading ? <Loading label="Reading site…" /> : <Text style={styles.error}>{dashboard.error?.message ?? 'Site unavailable.'}</Text>}
-  </Screen>;
-  const {site, flows, devices, schedules, history, readings, alerts} = dashboard.data;
-  return <Screen title={site.name} subtitle={`${site.location ?? site.timezone} · ${titleCase(site.health)}`} showTabs={false}
-    onRefresh={() => void dashboard.reload()} refreshing={dashboard.refreshing}>
-    <View style={styles.summary}><View><Text style={styles.summaryNumber}>{devices.filter(device => device.status === 'ONLINE').length}/{devices.length}</Text>
-      <Text style={styles.summaryCaption}>Devices online</Text></View><View><Text style={styles.summaryNumber}>{flows.length}</Text>
-      <Text style={styles.summaryCaption}>Operational flows</Text></View><View><Text style={styles.summaryNumber}>{alerts.filter(alert => !alert.resolved_at).length}</Text>
-      <Text style={styles.summaryCaption}>Open alerts</Text></View></View>
-    <Section icon="power" title="Operate flows">
-      {flows.length === 0 ? <Empty message="No operational flows have been configured for this site." /> : flows.map(flow => {
-        const ready = session.canControl && flow.status === 'PUBLISHED' && flow.online &&
-          flow.steps.every(step => step.feedback_quality === 'CONFIRMED') &&
-          !['ACCEPTED', 'WAITING_FEEDBACK'].includes(flow.latestRun?.state ?? '');
-        return <View key={flow.id} style={styles.flowCard}><View style={styles.flowHead}><View style={styles.flowIcon}><Icon name="flow" size={27} /></View>
-          <View style={styles.lineCopy}><Text style={styles.flowTitle}>{flow.name}</Text>
-            <Text style={styles.muted}>{flow.steps.length} steps · {flow.online ? 'Devices online' : 'Device offline'}</Text></View>
-          <Text style={styles.state}>{flow.currentState}</Text></View>
-          <View style={styles.stepPath}>{flow.steps.map((step, index) => <React.Fragment key={step.id}>
-            {index > 0 ? <Icon name="arrow" size={17} color={colors.muted} /> : null}
-            <Icon name={step.kind === 'VALVE' ? 'valve' : 'motor'} size={18} />
-            <Text style={styles.stepLabel}>{step.component_name}</Text></React.Fragment>)}</View>
-          <View style={styles.controlRow}><Pressable style={[styles.controlButton, styles.onButton, !ready || flow.currentState === 'ON' ? styles.disabled : null]}
-            disabled={!ready || flow.currentState === 'ON' || busyFlowId === flow.id} accessibilityRole="button"
-            accessibilityLabel={`Turn on ${flow.name}`} onPress={() => requestAction(flow, 'ON')}>
-            <Icon name="power" color={colors.white} size={23} /><Text style={styles.onText}>ON</Text></Pressable>
-            <Pressable style={[styles.controlButton, styles.offButton, !ready || flow.currentState === 'OFF' ? styles.disabled : null]}
-              disabled={!ready || flow.currentState === 'OFF' || busyFlowId === flow.id} accessibilityRole="button"
-              accessibilityLabel={`Turn off ${flow.name}`} onPress={() => requestAction(flow, 'OFF')}>
-              <Icon name="stop" size={23} /><Text style={styles.offText}>OFF</Text></Pressable></View>
-          {!ready ? <Text style={styles.hint}>{!session.canControl ? 'Your role has view-only access.' : !flow.online ?
-            'Control unavailable while a device is offline.' : flow.latestRun && ['ACCEPTED', 'WAITING_FEEDBACK'].includes(flow.latestRun.state) ?
-            'A command is waiting for device confirmation.' : 'Waiting for confirmed component feedback.'}</Text> : null}
-        </View>;
-      })}
-    </Section>
-    {activeRunId && run.data ? <Section icon="clock" title="Current operation">
-      <Line icon="flow" title={`${run.data.flow_name} · ${run.data.requested_action}`} state={run.data.state} />
-      {run.data.steps.map(step => <Line key={step.id} icon={step.action === 'OPEN' || step.action === 'CLOSE' ? 'valve' : 'motor'}
-        title={`${step.step_index}. ${step.component_name}`} subtitle={titleCase(step.action)} state={step.state} />)}
-    </Section> : null}
-    {error ? <Text style={styles.error}>{error}</Text> : null}
-    <Section icon="cpu" title="Devices">{devices.length ? devices.map(device => <Line key={device.id} icon="cpu"
-      title={device.name} subtitle={device.model} state={device.status} />) : <Empty message="No devices registered." />}</Section>
-    <Section icon="calendar" title="Schedules">{schedules.length ? schedules.map(schedule => <Line key={schedule.id} icon="calendar"
-      title={schedule.name} subtitle={schedule.recurrence} state={schedule.enabled ? 'Enabled' : 'Paused'} />) :
-      <Empty message="No schedules for this site." />}</Section>
-    <Section icon="chart" title="Sensor readings">{readings.length ? readings.slice(0, 10).map(reading =>
-      <Line key={reading.id} icon="sensor" title={`${reading.component_name}: ${reading.value}${reading.unit ? ` ${reading.unit}` : ''}`}
-        subtitle={when(reading.measured_at)} state={reading.quality} />) : <Empty message="No sensor readings reported yet." />}</Section>
-    <Section icon="bell" title="Alerts">{alerts.length ? alerts.slice(0, 10).map(alert =>
-      <Line key={alert.id} icon="alert" title={alert.title} subtitle={alert.detail} state={alert.severity} />) :
-      <Empty message="No alerts for this site." />}</Section>
-    <Section icon="clock" title="Past operations">{history.length ? history.slice(0, 15).map(event =>
-      <Line key={event.id} icon="flow" title={`${event.flow_name} · ${event.requested_action}`}
-        subtitle={when(event.started_at)} state={event.state} />) : <Empty message="No past operations yet." />}</Section>
+  const site = useResource<SiteDetail>(useCallback(() => getSite(siteId), [siteId]), [siteId], {pollMs: 20000});
+  return <Screen title={site.data?.name ?? 'Site'} subtitle="Zones at this site" showTabs={false} onRefresh={site.reload} refreshing={site.refreshing}>
+    {site.loading ? <Loading label="Reading site…" /> : null}{site.error && !site.data ? <ErrorText message={site.error.message} /> : null}
+    {site.data ? <ZoneGrid zones={site.data.zones} /> : null}
   </Screen>;
 }
 
+export function OperationsZoneScreen() {
+  const {zoneId} = useParams<'zone'>();
+  const navigation = useNavigation();
+  const zone = useResource<ZoneDetail>(useCallback(() => getZone(zoneId), [zoneId]), [zoneId], {pollMs: 15000});
+  return <Screen title={zone.data?.name ?? 'Zone'} subtitle={zone.data ? `${zone.data.site_name} · ${zone.data.location ?? ''}` : 'Loading zone'}
+    showTabs={false} onRefresh={zone.reload} refreshing={zone.refreshing}>
+    {zone.loading ? <Loading label="Reading devices…" /> : null}{zone.error && !zone.data ? <ErrorText message={zone.error.message} /> : null}
+    {zone.data ? <><View style={styles.summary}><Metric value={`${zone.data.devices.filter(device => device.status === 'ONLINE').length}/${zone.data.devices.length}`} label="Online" />
+      <Metric value={String(zone.data.devices.reduce((sum, device) => sum + (device.actuator_count ?? 0), 0))} label="Actuators" />
+      <Metric value={String(zone.data.devices.reduce((sum, device) => sum + (device.sensor_count ?? 0), 0))} label="Sensors" /></View>
+      <Section icon="cpu" title="Devices">{zone.data.devices.length ? zone.data.devices.map(device => <Pressable key={device.id} style={styles.deviceCard}
+        onPress={() => navigation.navigate('device', {deviceId: device.id})} accessibilityRole="button">
+        <View style={styles.deviceIcon}><Icon name="cpu" size={25} /></View><View style={styles.grow}><Text style={styles.deviceTitle}>{device.name}</Text>
+          <Text style={styles.muted}>{device.model} · {device.actuator_count ?? 0} controls · {device.sensor_count ?? 0} sensors</Text></View>
+        <View><Text style={[styles.state, device.status !== 'ONLINE' && styles.offlineText]}>{titleCase(device.status)}</Text><Icon name="next" size={19} /></View>
+      </Pressable>) : <Empty message="No devices are assigned to this zone." />}</Section></> : null}
+  </Screen>;
+}
+
+type DeviceDashboard = {device: DeviceDetail; flows: OperationalFlowDetail[]; readings: SensorReading[]};
+export function OperationsDeviceScreen() {
+  const {deviceId} = useParams<'device'>();
+  const session = useSession();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [editing, setEditing] = useState<DeviceComponent | null>(null);
+  const load = useCallback(async (): Promise<DeviceDashboard> => {
+    const device = await getDevice(deviceId);
+    const [flowRows, readings] = await Promise.all([getOperationalFlows(device.site_id), getSiteReadings(device.site_id)]);
+    const allFlows = await Promise.all(flowRows.map(flow => getOperationalFlow(flow.id)));
+    const ids = new Set(device.components.map(component => component.id));
+    return {device, flows: allFlows.filter(flow => flow.steps.some(step => step.device_id === device.id)), readings: readings.filter(reading => ids.has(reading.component_id))};
+  }, [deviceId]);
+  const dashboard = useResource<DeviceDashboard>(load, [deviceId], {pollMs: 15000});
+
+  async function run(flow: OperationalFlowDetail, action: 'ON' | 'OFF') {
+    const ordered = action === 'ON' ? flow.steps : [...flow.steps].reverse();
+    NativeAlert.alert(`${action} ${flow.name}?`, `${ordered.map(step => step.component_name).join(' → ')}. Each step waits for confirmation.`, [
+      {text: 'Cancel', style: 'cancel'}, {text: 'Request', onPress: async () => {setBusy(flow.id); setError('');
+        try { await operateFlow(flow.id, action); await dashboard.reload(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Operation refused.'); } finally { setBusy(''); }}},
+    ]);
+  }
+  async function saveComponent(component: DeviceComponent) {
+    setBusy(component.id); setError('');
+    try { await updateComponent(component); setEditing(null); await dashboard.reload(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not update component.'); } finally { setBusy(''); }
+  }
+  async function moveComponent(index: number, direction: -1 | 1) {
+    if (!dashboard.data) return; const ordered = [...dashboard.data.device.components]; const target = index + direction;
+    if (target < 0 || target >= ordered.length) return; [ordered[index], ordered[target]] = [ordered[target], ordered[index]]; setBusy('components'); setError('');
+    try { await Promise.all(ordered.map((component, order) => updateComponent({...component, display_order: order + 1}))); await dashboard.reload(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not rearrange components.'); } finally { setBusy(''); }
+  }
+  async function moveFlowStep(flow: OperationalFlowDetail, index: number, direction: -1 | 1) {
+    const ids = flow.steps.map(step => step.component_id); const target = index + direction; if (target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target], ids[index]]; setBusy(flow.id); setError('');
+    try { await updateOperationalFlow(flow.id, flow.name, ids); await dashboard.reload(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not change operation order.'); } finally { setBusy(''); }
+  }
+  if (!dashboard.data) return <Screen title="Device" subtitle="Loading configuration" showTabs={false}>
+    {dashboard.loading ? <Loading label="Reading device…" /> : <ErrorText message={dashboard.error?.message ?? 'Device unavailable.'} />}</Screen>;
+  const {device, flows, readings} = dashboard.data;
+  return <Screen title={device.name} subtitle={`${device.zone_name} · ${device.site_name}`} showTabs={false} onRefresh={dashboard.reload} refreshing={dashboard.refreshing}>
+    <View style={styles.deviceHero}><View><Text style={styles.heroLabel}>DEVICE STATUS</Text><Text style={styles.heroValue}>{titleCase(device.status)}</Text>
+      <Text style={styles.heroCopy}>{device.model} · {device.serial} · firmware {device.firmware ?? 'unknown'}</Text></View><Icon name="cpu" color={colors.white} size={42} /></View>
+    {error ? <ErrorText message={error} /> : null}
+    <Section icon="power" title="Device operations">{flows.length ? flows.map(flow => {
+      const ready = session.canControl && flow.online && flow.status === 'PUBLISHED' && flow.steps.every(step => step.feedback_quality === 'CONFIRMED');
+      return <View key={flow.id} style={styles.operationCard}><View style={styles.operationHead}><View><Text style={styles.deviceTitle}>{flow.name}</Text>
+        <Text style={styles.muted}>{flow.steps.length} ordered steps · state {flow.currentState}</Text></View><Text style={styles.state}>{flow.currentState}</Text></View>
+        <View style={styles.sequence}>{flow.steps.map((step, index) => <React.Fragment key={step.id}>{index ? <Icon name="arrow" size={15} color={colors.muted} /> : null}<Text style={styles.sequenceText}>{index + 1}. {step.component_name}</Text></React.Fragment>)}</View>
+        <View style={styles.controlRow}><Pressable disabled={!ready || busy === flow.id} style={[styles.control, styles.on, !ready && styles.disabled]} onPress={() => run(flow, 'ON')}><Text style={styles.onText}>ON</Text></Pressable>
+          <Pressable disabled={!ready || busy === flow.id} style={[styles.control, styles.off, !ready && styles.disabled]} onPress={() => run(flow, 'OFF')}><Text style={styles.offText}>OFF</Text></Pressable></View>
+        {session.canManage ? <View><Text style={styles.tableCaption}>OPERATION ORDER · ON top-to-bottom, OFF bottom-to-top</Text>{flow.steps.map((step, index) => <View key={step.id} style={styles.orderRow}>
+          <Text style={styles.orderNumber}>{index + 1}</Text><Text style={styles.growText}>{step.component_name} · {titleCase(step.on_action)}</Text>
+          <SmallButton label="↑" disabled={index === 0 || busy === flow.id} onPress={() => moveFlowStep(flow, index, -1)} /><SmallButton label="↓" disabled={index === flow.steps.length - 1 || busy === flow.id} onPress={() => moveFlowStep(flow, index, 1)} />
+        </View>)}</View> : null}{!ready ? <Text style={styles.hint}>{!session.canControl ? 'Your role is view only.' : 'Operations require online devices and confirmed component feedback.'}</Text> : null}</View>;
+    }) : <Empty message="No operational flow includes this device." />}</Section>
+    <Section icon="settings" title="Component configuration & arrangement">
+      <View style={styles.tableHeader}><Text style={styles.tableCellWide}>Component</Text><Text style={styles.tableCell}>Channel</Text><Text style={styles.tableCell}>State / value</Text></View>
+      {device.components.map((component, index) => <View key={component.id}>{editing?.id === component.id ? <View style={styles.editor}>
+        <TextInput style={styles.input} value={editing.name} onChangeText={name => setEditing({...editing, name})} placeholder="Component name" />
+        <TextInput style={styles.input} value={editing.hardware_channel} onChangeText={hardware_channel => setEditing({...editing, hardware_channel})} placeholder="Hardware channel" />
+        <Text style={styles.tableCaption}>COMPONENT TYPE</Text><View style={styles.kindChoices}>{['VALVE', 'MOTOR', 'PUMP', 'SWITCH', 'RELAY', 'SENSOR'].map(kind => <Pressable key={kind}
+          style={[styles.kindChoice, editing.kind === kind && styles.kindChoiceActive]} onPress={() => setEditing({...editing, kind})}>
+          <Text style={[styles.kindChoiceText, editing.kind === kind && styles.kindChoiceTextActive]}>{kind}</Text></Pressable>)}</View>
+        <View style={styles.controlRow}><SmallButton label="Cancel" onPress={() => setEditing(null)} /><SmallButton label="Save" disabled={busy === component.id} onPress={() => saveComponent(editing)} /></View>
+      </View> : <View style={styles.tableRow}><View style={styles.tableCellWide}><Icon name={componentIcon(component.kind)} size={18} /><View><Text style={styles.tableText}>{component.name}</Text><Text style={styles.tableSub}>{component.kind}</Text></View></View>
+        <Text style={styles.tableCell}>{component.hardware_channel}</Text><Text style={styles.tableCell}>{component.latest_value ?? titleCase(component.reported_state ?? 'Unknown')}</Text>
+        {session.canManage ? <View style={styles.rowActions}><SmallButton label="↑" disabled={index === 0 || busy === 'components'} onPress={() => moveComponent(index, -1)} /><SmallButton label="↓" disabled={index === device.components.length - 1 || busy === 'components'} onPress={() => moveComponent(index, 1)} />
+          <Pressable style={styles.editButton} onPress={() => setEditing({...component})}><Icon name="edit" size={16} /></Pressable></View> : null}</View>}</View>)}
+    </Section>
+    <Section icon="chart" title="Device data table">{readings.length ? readings.map(reading => <View key={reading.id} style={styles.dataRow}>
+      <Text style={styles.dataName}>{reading.component_name}</Text><Text style={styles.dataValue}>{reading.value}{reading.unit ? ` ${reading.unit}` : ''}</Text>
+      <Text style={styles.dataTime}>{when(reading.measured_at)}</Text><Text style={styles.state}>{titleCase(reading.quality)}</Text></View>) : <Empty message="No sensor data has been reported for this device." />}</Section>
+  </Screen>;
+}
+
+function Metric({value, label}: {value: string; label: string}) { return <View><Text style={styles.summaryNumber}>{value}</Text><Text style={styles.summaryCaption}>{label}</Text></View>; }
+function SmallButton({label, disabled, onPress}: {label: string; disabled?: boolean; onPress: () => void}) { return <Pressable style={[styles.smallButton, disabled && styles.disabled]} disabled={disabled} onPress={onPress}><Text style={styles.smallButtonText}>{label}</Text></Pressable>; }
+
 const styles = StyleSheet.create({
-  section: {gap: 10, marginBottom: 6}, sectionTitle: {flexDirection: 'row', alignItems: 'center', gap: 9},
-  heading: {fontSize: 18, fontWeight: '700', color: colors.ink}, muted: {fontSize: 13, color: colors.muted, lineHeight: 19},
-  intro: {backgroundColor: colors.forest, borderRadius: radius.hero, padding: 23, gap: 8},
-  introTitle: {fontSize: 26, fontWeight: '700', color: colors.white}, introCopy: {fontSize: 14, color: colors.heroCopy},
-  picker: {backgroundColor: colors.white, borderRadius: radius.action, borderWidth: 1, borderColor: colors.line,
-    padding: spacing.inner, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56},
-  pickerText: {fontSize: 16, fontWeight: '600', color: colors.ink, flex: 1},
-  option: {backgroundColor: colors.white, padding: 14, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginLeft: 10}, optionText: {fontSize: 15, color: colors.ink},
-  siteCard: {backgroundColor: colors.white, borderRadius: radius.card, padding: 15, flexDirection: 'row',
-    alignItems: 'center', gap: 13, minHeight: 84, borderWidth: 1, borderColor: colors.line},
-  siteIcon: {width: 52, height: 52, borderRadius: 16, backgroundColor: colors.sage, alignItems: 'center', justifyContent: 'center'},
-  siteCopy: {flex: 1, gap: 5}, siteTitle: {fontSize: 17, fontWeight: '700', color: colors.ink},
-  signOut: {flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12},
-  summary: {backgroundColor: colors.forest, borderRadius: radius.hero, padding: 22, flexDirection: 'row', justifyContent: 'space-between'},
-  summaryNumber: {fontSize: 25, fontWeight: '700', color: colors.white}, summaryCaption: {fontSize: 11, color: colors.heroCopy},
-  flowCard: {backgroundColor: colors.white, borderRadius: radius.card, padding: 17, gap: 14, borderWidth: 1, borderColor: colors.line},
-  flowHead: {flexDirection: 'row', alignItems: 'center', gap: 11}, flowIcon: {width: 47, height: 47, borderRadius: 14,
-    backgroundColor: colors.sage, alignItems: 'center', justifyContent: 'center'},
-  flowTitle: {fontSize: 17, fontWeight: '700', color: colors.ink},
-  stepPath: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5, paddingVertical: 3},
-  stepLabel: {fontSize: 12, fontWeight: '600', color: colors.ink},
-  controlRow: {flexDirection: 'row', gap: 10}, controlButton: {minHeight: 58, borderRadius: radius.action,
-    flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 9},
-  onButton: {backgroundColor: colors.green}, offButton: {backgroundColor: colors.sage, borderWidth: 1, borderColor: colors.line},
-  onText: {fontSize: 18, fontWeight: '800', color: colors.white}, offText: {fontSize: 18, fontWeight: '800', color: colors.green},
-  disabled: {opacity: 0.4}, hint: {fontSize: 12, color: colors.amber},
-  line: {backgroundColor: colors.white, borderRadius: 15, borderWidth: 1, borderColor: colors.line,
-    padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10},
-  lineIcon: {width: 38, height: 38, borderRadius: 12, backgroundColor: colors.sage,
-    alignItems: 'center', justifyContent: 'center'},
-  lineCopy: {flex: 1, gap: 3}, lineTitle: {fontSize: 14, fontWeight: '600', color: colors.ink},
-  state: {fontSize: 11, fontWeight: '700', color: colors.green}, empty: {fontSize: 14, color: colors.muted, padding: 16},
-  error: {fontSize: 13, color: colors.red, backgroundColor: colors.redBg, padding: 13, borderRadius: 12},
+  section: {gap: 10, marginBottom: 10}, sectionTitle: {flexDirection: 'row', alignItems: 'center', gap: 9}, heading: {fontSize: 18, fontWeight: '700', color: colors.ink}, muted: {fontSize: 13, color: colors.muted, lineHeight: 19},
+  intro: {backgroundColor: colors.forest, borderRadius: radius.hero, padding: 23, gap: 8}, introTitle: {fontSize: 26, fontWeight: '700', color: colors.white}, introCopy: {fontSize: 14, color: colors.heroCopy}, picker: {backgroundColor: colors.white, borderRadius: radius.action, borderWidth: 1, borderColor: colors.line, padding: spacing.inner, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56}, pickerText: {fontSize: 16, fontWeight: '600', color: colors.ink, flex: 1}, option: {backgroundColor: colors.white, padding: 14, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginLeft: 10}, optionText: {fontSize: 15, color: colors.ink},
+  groupMeta: {fontSize: 12, color: colors.muted, marginTop: -7}, zoneGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 10}, zoneCard: {width: '48%', minHeight: 150, backgroundColor: colors.white, borderRadius: radius.card, borderWidth: 1, borderColor: colors.line, padding: 15, gap: 7}, zoneIcon: {width: 44, height: 44, borderRadius: 14, backgroundColor: colors.sage, alignItems: 'center', justifyContent: 'center'}, zoneTitle: {fontSize: 16, fontWeight: '700', color: colors.ink}, zoneMeta: {fontSize: 12, color: colors.muted}, zoneStatus: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 'auto'}, zoneStatusText: {fontSize: 11, color: colors.muted}, dot: {width: 7, height: 7, borderRadius: 4}, dotOnline: {backgroundColor: colors.green}, dotOffline: {backgroundColor: colors.amber}, signOut: {flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12},
+  summary: {backgroundColor: colors.forest, borderRadius: radius.hero, padding: 22, flexDirection: 'row', justifyContent: 'space-between'}, summaryNumber: {fontSize: 25, fontWeight: '700', color: colors.white}, summaryCaption: {fontSize: 11, color: colors.heroCopy}, deviceCard: {backgroundColor: colors.white, borderRadius: 15, borderWidth: 1, borderColor: colors.line, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11}, deviceIcon: {width: 45, height: 45, borderRadius: 13, backgroundColor: colors.sage, alignItems: 'center', justifyContent: 'center'}, grow: {flex: 1}, growText: {flex: 1, color: colors.ink, fontSize: 13}, deviceTitle: {fontSize: 16, fontWeight: '700', color: colors.ink}, state: {fontSize: 11, fontWeight: '700', color: colors.green}, offlineText: {color: colors.amber},
+  deviceHero: {backgroundColor: colors.forest, borderRadius: radius.hero, padding: 21, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}, heroLabel: {fontSize: 10, letterSpacing: 1.5, color: colors.heroCopy}, heroValue: {fontSize: 27, fontWeight: '800', color: colors.white, marginVertical: 5}, heroCopy: {fontSize: 12, color: colors.heroCopy}, operationCard: {backgroundColor: colors.white, borderRadius: radius.card, borderWidth: 1, borderColor: colors.line, padding: 16, gap: 13}, operationHead: {flexDirection: 'row', justifyContent: 'space-between'}, sequence: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5}, sequenceText: {fontSize: 12, color: colors.ink}, controlRow: {flexDirection: 'row', gap: 8}, control: {flex: 1, minHeight: 48, borderRadius: radius.action, alignItems: 'center', justifyContent: 'center'}, on: {backgroundColor: colors.green}, off: {backgroundColor: colors.sage, borderWidth: 1, borderColor: colors.line}, onText: {color: colors.white, fontSize: 17, fontWeight: '800'}, offText: {color: colors.green, fontSize: 17, fontWeight: '800'}, disabled: {opacity: 0.4}, hint: {fontSize: 12, color: colors.amber},
+  tableCaption: {fontSize: 10, letterSpacing: 0.8, color: colors.muted, marginVertical: 7}, orderRow: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.line}, orderNumber: {width: 24, height: 24, borderRadius: 12, textAlign: 'center', paddingTop: 3, backgroundColor: colors.sage, color: colors.green, fontWeight: '700'}, smallButton: {minWidth: 34, minHeight: 32, paddingHorizontal: 9, borderRadius: 9, backgroundColor: colors.sage, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line}, smallButtonText: {fontSize: 13, color: colors.green, fontWeight: '700'},
+  tableHeader: {flexDirection: 'row', backgroundColor: colors.sage, borderRadius: 10, padding: 9}, tableRow: {backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.line, paddingVertical: 11, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 6}, tableCellWide: {flex: 1.45, color: colors.ink, fontSize: 11, flexDirection: 'row', alignItems: 'center', gap: 6}, tableCell: {flex: 1, color: colors.ink, fontSize: 11}, tableText: {fontSize: 12, fontWeight: '600', color: colors.ink}, tableSub: {fontSize: 10, color: colors.muted}, rowActions: {flexDirection: 'row', gap: 3}, editButton: {width: 32, height: 32, alignItems: 'center', justifyContent: 'center'}, editor: {backgroundColor: colors.white, borderRadius: 12, padding: 12, gap: 8, borderWidth: 1, borderColor: colors.line}, input: {minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 10, color: colors.ink, paddingHorizontal: 12, backgroundColor: colors.paper},
+  kindChoices: {flexDirection: 'row', flexWrap: 'wrap', gap: 6}, kindChoice: {paddingVertical: 7, paddingHorizontal: 9, borderRadius: 9, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.paper}, kindChoiceActive: {backgroundColor: colors.green, borderColor: colors.green}, kindChoiceText: {fontSize: 10, fontWeight: '700', color: colors.green}, kindChoiceTextActive: {color: colors.white},
+  dataRow: {backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.line, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8}, dataName: {flex: 1.3, color: colors.ink, fontWeight: '600', fontSize: 12}, dataValue: {flex: 0.8, color: colors.green, fontWeight: '700', fontSize: 12}, dataTime: {flex: 1.1, color: colors.muted, fontSize: 10}, empty: {fontSize: 14, color: colors.muted, padding: 16}, error: {fontSize: 13, color: colors.red, backgroundColor: colors.redBg, padding: 13, borderRadius: 12},
 });

@@ -5,5 +5,6 @@ import './styles.css';
 import './workspace.css';
 import './platform.css';
 import './flow-manager.css';
+import './operations-hierarchy.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
