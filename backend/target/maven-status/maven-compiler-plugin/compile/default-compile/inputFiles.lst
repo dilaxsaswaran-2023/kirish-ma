@@ -14,6 +14,8 @@ D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\AuthService.java
 D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\BootstrapData.java
 D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\DeviceIngestService.java
 D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\MqttDeviceService.java
+D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\MqttIngestService.java
+D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\MqttOutboxDispatcher.java
 D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\OperationalFlowService.java
 D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\OperationalFlowTimeoutWorker.java
 D:\apps\kirish-ma\backend\src\main\java\com\agrothulir\service\PlatformService.java

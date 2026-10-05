@@ -1,4 +1,4 @@
 -------------------------------------------------------------------------------
 Test set: com.agrothulir.service.PlatformServiceTest
 -------------------------------------------------------------------------------
-Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.068 s -- in com.agrothulir.service.PlatformServiceTest
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.391 s -- in com.agrothulir.service.PlatformServiceTest
