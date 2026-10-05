@@ -59,7 +59,7 @@ Copy the printed topic and JSON into MQTT Explorer's Publish panel. Select JSON,
 
 Look under `results` for `stored: true`. The device becomes online and the values appear in its web/mobile device page. These are **manually supplied test measurements**, stored through the real MQTT/database pipeline—not readings from physical sensors.
 
-Messages must be newer than the last component measurement and within 90 seconds of server time (at most 30 seconds ahead). Generate a fresh message every time; replaying the same `messageId` is deduplicated. All samples in a batch commit together. Retained payloads, wrong tokens, foreign component IDs and invalid states are rejected. A single sample can also be sent at the top level instead of `samples`.
+Messages must be newer than the last component measurement and within 90 seconds of server time (at most 30 seconds ahead). Generate a fresh message every time; replaying the same `messageId` is deduplicated. All samples in a batch commit together. Retained publishing is disabled at the broker: attempting it disconnects the client. Wrong tokens, foreign component IDs and invalid states are rejected by the backend. A single sample can also be sent at the top level instead of `samples`.
 
 ## 2. Test motor ON
 
@@ -117,3 +117,7 @@ docker compose --env-file .env.production -f compose.prod.yml logs --tail 100 mq
 ```
 
 New integrations use the existing REST routes; no MQTT passwords belong in browser or mobile env files. `/v1/devices/{id}/diagnostics` reports the backend broker connection status. A disconnected broker rejects new operations with `MQTT_UNAVAILABLE`. Existing accounts, equipment and real history are preserved. Flyway V5 adds message deduplication; V6 removes only old sensor readings labelled `SEEDED`. A pre-deployment database dump is retained under `/opt/backups`.
+
+## Automated live test (no physical hardware)
+
+Install `paho-mqtt==2.1.0` in your Python environment. In a separate terminal, open `ssh -N -L 15030:127.0.0.1:5030 root@45.67.221.203` so API login travels through SSH. Then run `python deploy/mqtt/live-test.py` from the repository and enter the operator API password when prompted. The script refuses to operate any device other than the explicit no-hardware Explorer fixture. It checks TLS, telemetry persistence/deduplication, credential rejection, command ACLs, and ON/OFF feedback confirmation, and leaves the test motor stopped and device offline. Close the SSH tunnel afterward.
