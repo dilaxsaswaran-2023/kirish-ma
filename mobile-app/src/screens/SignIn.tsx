@@ -1,12 +1,12 @@
-import React, {useState} from 'react';
-import {ApiError} from '../api/client';
-import {useNavigation} from '../navigation/Navigator';
-import {useSession} from '../state/SessionContext';
-import {Screen} from '../ui/Screen';
-import {ActionButton} from '../ui/ActionButton';
-import {Hero, Note} from '../ui/blocks';
-import {InputField} from '../ui/inputs';
-import {ErrorState} from '../ui/StateViews';
+import React, { useState } from 'react';
+import { ApiError } from '../api/client';
+import { useNavigation } from '../navigation/Navigator';
+import { useSession } from '../state/SessionContext';
+import { Screen } from '../ui/Screen';
+import { ActionButton } from '../ui/ActionButton';
+import { Hero, Note } from '../ui/blocks';
+import { InputField } from '../ui/inputs';
+import { ErrorState } from '../ui/StateViews';
 
 export function SignInScreen() {
   const navigation = useNavigation();
@@ -18,7 +18,7 @@ export function SignInScreen() {
   const submit = async () => {
     setError(undefined);
     try {
-      await session.signIn({email, password});
+      await session.signIn({ email: email.trim(), password });
       navigation.reset('home');
     } catch (cause) {
       setError(cause as ApiError);
@@ -26,26 +26,44 @@ export function SignInScreen() {
   };
 
   return (
-    <Screen title="Welcome back" subtitle="Sign in to control your assigned sites." showTabs={false}>
+    <Screen
+      title="Welcome to Kirish"
+      subtitle="Sign in to view and use your farm equipment."
+      showTabs={false}
+    >
       <Hero
         icon="leaf"
-        label="KIRISH OPERATIONS"
-        value="Your devices"
-        sub="Sites, operational flows, alerts, and schedules in one place."
+        label="YOUR FARM"
+        value="Farming made easier"
+        sub="Check your equipment and start or stop it from your phone."
       />
-      <InputField label="Email" value={email} onChangeText={setEmail} icon="user" keyboardType="default" />
-      <InputField label="Password" value={password} onChangeText={setPassword} icon="lock" secureTextEntry />
+      <InputField
+        label="Email"
+        placeholder="Enter your email"
+        value={email}
+        onChangeText={setEmail}
+        icon="user"
+        keyboardType="email-address"
+      />
+      <InputField
+        label="Password"
+        value={password}
+        onChangeText={setPassword}
+        icon="lock"
+        secureTextEntry
+      />
       <ActionButton
         label={session.connecting ? 'Connecting…' : 'Sign in'}
         icon="arrow"
         onPress={submit}
         busy={session.connecting}
+        disabled={!email.trim() || !password}
       />
       {error ? <ErrorState error={error} onRetry={submit} /> : null}
       <Note
         icon="shield"
-        label="Site access is protected"
-        sub="The backend decides which sites and flows you can see and control."
+        label="Need help signing in?"
+        sub="Ask your farm manager for your email and password."
       />
     </Screen>
   );

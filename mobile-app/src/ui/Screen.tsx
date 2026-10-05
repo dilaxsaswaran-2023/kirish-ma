@@ -8,17 +8,25 @@ import {
   Text,
   View,
 } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
-import {Icon, IconName} from '../icons';
-import {colors, radius, sizes, spacing, Tone, tones, type as typography} from '../theme';
-import {useNavigation} from '../navigation/Navigator';
-import {TABS, TAB_FOR_ROUTE} from '../navigation/routes';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Icon, IconName } from '../icons';
+import {
+  colors,
+  radius,
+  sizes,
+  spacing,
+  Tone,
+  tones,
+  type as typography,
+} from '../theme';
+import { useNavigation } from '../navigation/Navigator';
+import { TABS, TAB_FOR_ROUTE } from '../navigation/routes';
 
 type ScreenProps = {
   title: string;
   subtitle?: string;
   /** Circular status badge beside the title. */
-  badge?: {icon: IconName; tone?: Tone};
+  badge?: { icon: IconName; tone?: Tone };
   children: React.ReactNode;
   /** Hide the back arrow on entry points and on screens that must not be left mid-run. */
   hideBack?: boolean;
@@ -26,6 +34,7 @@ type ScreenProps = {
   showTabs?: boolean;
   onRefresh?: () => void;
   refreshing?: boolean;
+  onHome?: () => void;
 };
 
 export function Screen({
@@ -38,6 +47,7 @@ export function Screen({
   showTabs = true,
   onRefresh,
   refreshing = false,
+  onHome,
 }: ScreenProps) {
   const navigation = useNavigation();
   const activeTab = TAB_FOR_ROUTE[navigation.route.name];
@@ -52,7 +62,11 @@ export function Screen({
             accessibilityRole="button"
             accessibilityLabel="Go back"
             onPress={onBack ?? navigation.goBack}
-            style={({pressed}) => [styles.back, pressed ? styles.pressed : null]}>
+            style={({ pressed }) => [
+              styles.back,
+              pressed ? styles.pressed : null,
+            ]}
+          >
             <Icon name="back" color={colors.green} size={24} />
           </Pressable>
         ) : null}
@@ -66,10 +80,27 @@ export function Screen({
             </Text>
           ) : null}
         </View>
-        {badge ? (
+        {onHome ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="My farm home"
+            onPress={onHome}
+            style={styles.back}
+          >
+            <Icon name="home" color={colors.green} size={24} />
+          </Pressable>
+        ) : badge ? (
           <View
-            style={[styles.headerBadge, {backgroundColor: tones[badge.tone ?? 'green'].bg}]}>
-            <Icon name={badge.icon} color={tones[badge.tone ?? 'green'].fg} size={24} />
+            style={[
+              styles.headerBadge,
+              { backgroundColor: tones[badge.tone ?? 'green'].bg },
+            ]}
+          >
+            <Icon
+              name={badge.icon}
+              color={tones[badge.tone ?? 'green'].fg}
+              size={24}
+            />
           </View>
         ) : null}
       </View>
@@ -87,7 +118,8 @@ export function Screen({
               tintColor={colors.green}
             />
           ) : undefined
-        }>
+        }
+      >
         {children}
       </ScrollView>
 
@@ -96,7 +128,7 @@ export function Screen({
   );
 }
 
-function TabBar({active}: {active?: string}) {
+function TabBar({ active }: { active?: string }) {
   const navigation = useNavigation();
   return (
     <View style={styles.tabBar}>
@@ -106,16 +138,19 @@ function TabBar({active}: {active?: string}) {
           <Pressable
             key={tab.name}
             accessibilityRole="tab"
-            accessibilityState={{selected}}
+            accessibilityState={{ selected }}
             accessibilityLabel={tab.label}
             onPress={() => navigation.reset(tab.route)}
-            style={[styles.tab, selected ? styles.tabActive : null]}>
+            style={[styles.tab, selected ? styles.tabActive : null]}
+          >
             <Icon
               name={tab.icon as IconName}
               color={selected ? colors.green : colors.muted}
               size={24}
             />
-            <Text style={[styles.tabLabel, selected ? styles.tabLabelActive : null]}>
+            <Text
+              style={[styles.tabLabel, selected ? styles.tabLabelActive : null]}
+            >
               {tab.label}
             </Text>
           </Pressable>
@@ -126,7 +161,7 @@ function TabBar({active}: {active?: string}) {
 }
 
 const styles = StyleSheet.create({
-  safe: {flex: 1, backgroundColor: colors.paper},
+  safe: { flex: 1, backgroundColor: colors.paper },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -135,9 +170,9 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 10,
   },
-  headerCopy: {flex: 1, gap: 5},
-  title: {...typography.title, color: colors.ink},
-  subtitle: {...typography.small, color: colors.muted},
+  headerCopy: { flex: 1, gap: 5 },
+  title: { ...typography.title, color: colors.ink },
+  subtitle: { ...typography.small, color: colors.muted },
   back: {
     width: sizes.touch,
     height: sizes.touch,
@@ -155,8 +190,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pressed: {opacity: 0.7},
-  scroll: {flex: 1},
+  pressed: { opacity: 0.7 },
+  scroll: { flex: 1 },
   content: {
     paddingHorizontal: spacing.gutter,
     paddingTop: 8,
@@ -181,7 +216,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
   },
-  tabActive: {backgroundColor: colors.sage},
-  tabLabel: {fontSize: 12, color: colors.muted, fontWeight: '600'},
-  tabLabelActive: {color: colors.green},
+  tabActive: { backgroundColor: colors.sage },
+  tabLabel: { fontSize: 12, color: colors.muted, fontWeight: '600' },
+  tabLabelActive: { color: colors.green },
 });

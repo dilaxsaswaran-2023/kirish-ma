@@ -1,7 +1,7 @@
 import React from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {Icon, IconName} from '../icons';
-import {colors, radius, sizes, spacing, type as typography} from '../theme';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Icon, IconName } from '../icons';
+import { colors, radius, sizes, spacing, type as typography } from '../theme';
 
 export function InputField({
   label,
@@ -20,7 +20,7 @@ export function InputField({
   icon?: IconName;
   placeholder?: string;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-  keyboardType?: 'default' | 'url' | 'numeric';
+  keyboardType?: 'default' | 'url' | 'numeric' | 'email-address';
   hint?: string;
   secureTextEntry?: boolean;
 }) {
@@ -55,7 +55,7 @@ export function QuickPicks({
   onPick,
 }: {
   label: string;
-  options: {value: string; label: string}[];
+  options: { value: string; label: string }[];
   value: string;
   onPick: (next: string) => void;
 }) {
@@ -69,11 +69,17 @@ export function QuickPicks({
             <Pressable
               key={option.value}
               accessibilityRole="button"
-              accessibilityState={{selected}}
+              accessibilityState={{ selected }}
               accessibilityLabel={`${option.label}: ${option.value}`}
               onPress={() => onPick(option.value)}
-              style={[styles.segment, selected ? styles.segmentSelected : null]}>
-              <Text style={[styles.segmentText, selected ? styles.segmentTextSelected : null]}>
+              style={[styles.segment, selected ? styles.segmentSelected : null]}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  selected ? styles.segmentTextSelected : null,
+                ]}
+              >
                 {option.label}
               </Text>
             </Pressable>
@@ -91,7 +97,7 @@ export function Segmented<T extends string>({
   onChange,
 }: {
   label: string;
-  options: {value: T; label: string}[];
+  options: { value: T; label: string }[];
   value: T;
   onChange: (next: T) => void;
 }) {
@@ -105,10 +111,16 @@ export function Segmented<T extends string>({
             <Pressable
               key={option.value}
               accessibilityRole="radio"
-              accessibilityState={{selected}}
+              accessibilityState={{ selected }}
               onPress={() => onChange(option.value)}
-              style={[styles.segment, selected ? styles.segmentSelected : null]}>
-              <Text style={[styles.segmentText, selected ? styles.segmentTextSelected : null]}>
+              style={[styles.segment, selected ? styles.segmentSelected : null]}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  selected ? styles.segmentTextSelected : null,
+                ]}
+              >
                 {option.label}
               </Text>
             </Pressable>
@@ -128,8 +140,8 @@ const styles = StyleSheet.create({
     padding: spacing.inner,
     gap: 7,
   },
-  label: {...typography.small, color: colors.muted},
-  inputRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  label: { ...typography.small, color: colors.muted },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   input: {
     flex: 1,
     ...typography.body,
@@ -137,8 +149,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     minHeight: 34,
   },
-  hint: {fontSize: 12, color: colors.muted},
-  segmentRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4},
+  hint: { fontSize: 12, color: colors.muted },
+  segmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   segment: {
     minHeight: sizes.touch - 8,
     justifyContent: 'center',
@@ -148,7 +160,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
-  segmentSelected: {backgroundColor: colors.green, borderColor: colors.green},
-  segmentText: {fontSize: 14, fontWeight: '600', color: colors.green},
-  segmentTextSelected: {color: colors.white},
+  segmentSelected: { backgroundColor: colors.green, borderColor: colors.green },
+  segmentText: { fontSize: 14, fontWeight: '600', color: colors.green },
+  segmentTextSelected: { color: colors.white },
 });
