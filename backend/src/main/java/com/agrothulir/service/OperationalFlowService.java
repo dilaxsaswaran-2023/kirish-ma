@@ -102,12 +102,29 @@ public class OperationalFlowService {
         lockFlow(context, flowId);
         List<Map<String, Object>> duplicate = rows("SELECT id FROM runs WHERE corporation_id=? AND idempotency_key=?", context.corporationId(), idempotencyKey);
         if (!duplicate.isEmpty()) return run(context, duplicate.get(0).get("id").toString());
+        mqtt.requireAvailable();
+        // One component cannot be controlled concurrently by two different flows.
+        var componentIds = rows("SELECT component_id FROM flow_steps WHERE flow_id=? ORDER BY component_id", flowId);
+        for (var item : componentIds) {
+            String id = item.get("component_id").toString();
+            jdbc.queryForObject("SELECT id FROM components WHERE id=? FOR UPDATE", String.class, id);
+            Long busy = jdbc.queryForObject("SELECT COUNT(*) FROM flow_run_steps frs JOIN runs r ON r.id=frs.run_id " +
+                "WHERE frs.component_id=? AND r.state IN ('ACCEPTED','WAITING_FEEDBACK')", Long.class, id);
+            if (busy != null && busy > 0) throw conflict("RESOURCE_BUSY", "This equipment is already in another active operation.");
+        }
+        flow = flow(context, flowId);
         if (!"PUBLISHED".equals(flow.get("status"))) throw conflict("FLOW_UNAVAILABLE", "Only published operational flows can be controlled.");
         @SuppressWarnings("unchecked") List<Map<String, Object>> steps = (List<Map<String, Object>>) flow.get("steps");
         if (steps.isEmpty()) throw conflict("FLOW_EMPTY", "This flow has no components.");
         if (!(Boolean) flow.get("online")) throw conflict("DEVICE_OFFLINE", "A device in this flow is offline. No command was queued.");
         if (steps.stream().anyMatch(s -> !"CONFIRMED".equals(s.get("feedback_quality"))))
             throw conflict("FEEDBACK_UNKNOWN", "Wait for confirmed component feedback before controlling this flow.");
+        for (var item : componentIds) {
+            Long fresh = jdbc.queryForObject("SELECT COUNT(*) FROM components c JOIN devices d ON d.id=c.device_id " +
+                "WHERE c.id=? AND c.measured_at>? AND d.last_seen_at>?", Long.class, item.get("component_id"),
+                Timestamp.from(Instant.now().minusSeconds(120)), Timestamp.from(Instant.now().minusSeconds(120)));
+            if (fresh == null || fresh == 0) throw conflict("FEEDBACK_UNKNOWN", "Equipment feedback is too old. Report live component state before controlling this flow.");
+        }
         Long active = jdbc.queryForObject("SELECT COUNT(*) FROM runs WHERE flow_id=? AND state IN ('ACCEPTED','WAITING_FEEDBACK')", Long.class, flowId);
         if (active != null && active > 0) throw conflict("FLOW_BUSY", "A previous operation is still waiting for device confirmation.");
         String runId = UUID.randomUUID().toString();
@@ -216,7 +233,8 @@ public class OperationalFlowService {
             step.get("device_id") + "\",\"componentId\":\"" + step.get("component_id") + "\",\"action\":\"" + step.get("action") + "\"}";
         jdbc.update("INSERT INTO outbox_events(id,aggregate_id,event_type,payload,created_at) VALUES (?,?,?,?,?)",
             UUID.randomUUID().toString(), commandId, "OPERATIONAL_FLOW_COMMAND", payload, Timestamp.from(now));
-        mqtt.commandQueued(commandId, step.get("device_id").toString(), step.get("component_id").toString(), step.get("action").toString());
+        // The MQTT dispatcher reads only committed outbox rows. Never publish here:
+        // this transaction could still roll back after a physical command was sent.
     }
 
     static String expectedState(String action) {

@@ -41,8 +41,10 @@ public class OperationalFlowTimeoutWorker {
     @Transactional
     public void markSilentDevicesOffline() {
         Timestamp threshold = Timestamp.from(Instant.now().minusSeconds(120));
+        jdbc.update("UPDATE components SET feedback_quality='STALE' WHERE feedback_quality='CONFIRMED' AND measured_at<?", threshold);
         jdbc.update("UPDATE components SET feedback_quality='STALE' WHERE device_id IN " +
             "(SELECT id FROM devices WHERE status='ONLINE' AND last_seen_at<?)", threshold);
         jdbc.update("UPDATE devices SET status='OFFLINE' WHERE status='ONLINE' AND last_seen_at<?", threshold);
+        jdbc.update("DELETE FROM mqtt_ingest_messages WHERE received_at<?", Timestamp.from(Instant.now().minusSeconds(604800)));
     }
 }

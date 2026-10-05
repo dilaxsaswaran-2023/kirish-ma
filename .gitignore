@@ -1,1 +1,5 @@
 .env.production
+deploy/mqtt/runtime/
+mqtt-connection-private.json
+mqtt-test-private.json
+deploy/mqtt/__pycache__/

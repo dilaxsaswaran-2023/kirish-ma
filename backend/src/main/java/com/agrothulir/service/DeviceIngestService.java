@@ -17,17 +17,18 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
 public class DeviceIngestService {
     private final JdbcTemplate jdbc;
     private final OperationalFlowService flows;
-    private final MqttDeviceService mqtt;
     private final SecureRandom random = new SecureRandom();
 
-    public DeviceIngestService(JdbcTemplate jdbc, OperationalFlowService flows, MqttDeviceService mqtt) {
-        this.jdbc = jdbc; this.flows = flows; this.mqtt = mqtt;
+    public DeviceIngestService(JdbcTemplate jdbc, OperationalFlowService flows) {
+        this.jdbc = jdbc; this.flows = flows;
     }
 
     @Transactional
@@ -69,7 +70,15 @@ public class DeviceIngestService {
     @Transactional
     public Map<String, Object> feedback(String deviceId, String token, String componentId, String reportedState,
         String quality, String value, String unit, String commandId) {
+        return feedbackAt(deviceId, token, componentId, reportedState, quality, value, unit, commandId, Instant.now());
+    }
+
+    @Transactional
+    public Map<String, Object> feedbackAt(String deviceId, String token, String componentId, String reportedState,
+        String quality, String value, String unit, String commandId, Instant measuredAt) {
         authenticate(deviceId, token);
+        // Serialize acknowledgements from this device, including concurrent HTTP/MQTT retries.
+        jdbc.queryForObject("SELECT id FROM devices WHERE id=? FOR UPDATE", String.class, deviceId);
         List<Map<String, Object>> components = jdbc.queryForList("SELECT corporation_id,site_id,kind FROM components WHERE id=? AND device_id=?",
             componentId, deviceId);
         if (components.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "COMPONENT_NOT_FOUND", "Component was not found on this device.");
@@ -78,15 +87,29 @@ public class DeviceIngestService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_QUALITY", "Choose a valid feedback quality.");
         if (reportedState == null || reportedState.isBlank())
             throw new ApiException(HttpStatus.BAD_REQUEST, "STATE_REQUIRED", "Report the component state.");
+        reportedState = reportedState.toUpperCase(Locale.ROOT);
+        Set<String> allowed = switch (component.get("kind").toString()) {
+            case "VALVE" -> Set.of("OPEN", "CLOSED", "UNKNOWN", "FAULT");
+            case "MOTOR", "PUMP" -> Set.of("RUNNING", "STOPPED", "UNKNOWN", "FAULT");
+            case "SWITCH", "RELAY" -> Set.of("ON", "OFF", "UNKNOWN", "FAULT");
+            case "SENSOR" -> Set.of("VALID", "INVALID", "UNKNOWN", "FAULT");
+            default -> Set.of("UNKNOWN", "FAULT");
+        };
+        if (!allowed.contains(reportedState) || value != null && value.length() > 160 || unit != null && unit.length() > 40)
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_FEEDBACK", "Choose a valid component state and bounded reading value.");
+        if (commandId != null && !commandId.isBlank()) {
+            Long complete = jdbc.queryForObject("SELECT COUNT(*) FROM commands WHERE id=? AND device_id=? AND component_id=? AND state='CONFIRMED'",
+                Long.class, commandId, deviceId, componentId);
+            if (complete != null && complete > 0) return Map.of("componentId", componentId, "stored", false, "flowAdvanced", false);
+        }
         Instant now = Instant.now();
         jdbc.update("UPDATE devices SET status='ONLINE',last_seen_at=? WHERE id=?", Timestamp.from(now), deviceId);
         jdbc.update("UPDATE components SET reported_state=?,feedback_quality=?,latest_value=?,state_version=state_version+1,measured_at=? WHERE id=?",
-            reportedState.toUpperCase(), quality, value, Timestamp.from(now), componentId);
-        mqtt.feedbackReceived(deviceId, componentId, reportedState);
+            reportedState, quality, value, Timestamp.from(measuredAt), componentId);
         if ("SENSOR".equals(component.get("kind")) && value != null && !value.isBlank()) {
             jdbc.update("INSERT INTO sensor_readings(id,corporation_id,site_id,device_id,component_id,reading_value,unit,quality,measured_at) " +
                 "VALUES (?,?,?,?,?,?,?,?,?)", UUID.randomUUID().toString(), component.get("corporation_id"), component.get("site_id"),
-                deviceId, componentId, value, unit, quality, Timestamp.from(now));
+                deviceId, componentId, value, unit, quality, Timestamp.from(measuredAt));
         }
         boolean advanced = false;
         if (commandId != null && !commandId.isBlank()) {
@@ -107,7 +130,7 @@ public class DeviceIngestService {
         return Map.of("componentId", componentId, "stored", true, "flowAdvanced", advanced);
     }
 
-    private void authenticate(String deviceId, String token) {
+    void authenticate(String deviceId, String token) {
         if (token == null || token.isBlank()) throw new ApiException(HttpStatus.UNAUTHORIZED, "DEVICE_TOKEN_REQUIRED", "Device token is required.");
         List<String> stored = jdbc.queryForList("SELECT token_hash FROM device_credentials WHERE device_id=?", String.class, deviceId);
         if (stored.size() != 1 || !MessageDigest.isEqual(stored.get(0).getBytes(StandardCharsets.US_ASCII),

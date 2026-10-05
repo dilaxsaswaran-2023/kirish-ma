@@ -20,7 +20,8 @@ import java.util.*;
 public class PlatformService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
-    public PlatformService(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
+    private final MqttDeviceService mqtt;
+    public PlatformService(JdbcTemplate jdbc, ObjectMapper json, MqttDeviceService mqtt) { this.jdbc = jdbc; this.json = json; this.mqtt = mqtt; }
 
     public Map<String, Object> me(TenantContext context) {
         Map<String, Object> user = one("SELECT id, display_name, account_status FROM users WHERE id = ?", context.userId());
@@ -135,7 +136,7 @@ public class PlatformService {
         Map<String, Object> device = device(context, deviceId);
         String seen = Objects.toString(device.get("last_seen_at"), "");
         long lag = seen.isEmpty() ? -1 : Math.max(0, ChronoUnit.SECONDS.between(Instant.parse(seen), Instant.now()));
-        return Map.of("deviceId", deviceId, "status", device.get("status"), "mqtt", "UNKNOWN",
+        return Map.of("deviceId", deviceId, "status", device.get("status"), "mqtt", mqtt.connectionStatus(),
             "telemetryLagSeconds", lag, "configuration", "UNKNOWN");
     }
 

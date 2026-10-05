@@ -29,8 +29,15 @@ services:
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       CORS_ALLOWED_ORIGINS: ${PUBLIC_WEB_URL}
       BOOTSTRAP_INITIAL_PASSWORD: ${BOOTSTRAP_INITIAL_PASSWORD}
+      MQTT_ENABLED: "true"
+      MQTT_BROKER_URL: tcp://mqtt:1883
+      MQTT_USERNAME: ${MQTT_BACKEND_USERNAME}
+      MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD}
+      MQTT_CLIENT_ID: kirish-backend
     depends_on:
       postgres:
+        condition: service_healthy
+      mqtt:
         condition: service_healthy
     ports:
       - "5030:8080"
@@ -53,8 +60,30 @@ services:
       - private
       - public
 
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    restart: unless-stopped
+    environment:
+      MQTT_BACKEND_USERNAME: ${MQTT_BACKEND_USERNAME}
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD}
+    ports:
+      - "8884:8883"
+    volumes:
+      - ./deploy/mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mqtt/runtime:/mosquitto/config/runtime:ro
+      - mqtt-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -u \"$$MQTT_BACKEND_USERNAME\" -P \"$$MQTT_BACKEND_PASSWORD\" -t kirish/backend/health -E -W 5"]
+      interval: 10s
+      timeout: 6s
+      retries: 5
+    networks:
+      - private
+      - public
+
 volumes:
   postgres-data:
+  mqtt-data:
 
 networks:
   private:

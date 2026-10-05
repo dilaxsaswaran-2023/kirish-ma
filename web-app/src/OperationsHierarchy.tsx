@@ -17,13 +17,14 @@ export default function OperationsHierarchy({sites, canManage, canControl, corpo
   const [editing, setEditing] = useState<DeviceComponent | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [readFailed, setReadFailed] = useState(false);
   const grouped = useMemo(() => sites.map(site => ({site, zones: zones.filter(item => item.site_id === site.id)})), [sites, zones]);
 
   const load = useCallback(async () => {
     setError('');
     try {
-      if (view.kind === 'zones') { setZones(await api<Zone[]>('/v1/zones')); return; }
-      if (view.kind === 'zone') { setZone(await api<ZoneDetail>(`/v1/zones/${view.id}`)); return; }
+      if (view.kind === 'zones') { setZones(await api<Zone[]>('/v1/zones')); setReadFailed(false); return; }
+      if (view.kind === 'zone') { setZone(await api<ZoneDetail>(`/v1/zones/${view.id}`)); setReadFailed(false); return; }
       const detail = await api<DeviceDetail>(`/v1/devices/${view.id}`);
       const [flowRows, readingRows] = await Promise.all([
         api<OperationalFlow[]>(`/v1/sites/${detail.site_id}/operational-flows`),
@@ -33,9 +34,10 @@ export default function OperationsHierarchy({sites, canManage, canControl, corpo
       const ids = new Set(detail.components.map(component => component.id));
       setDevice(detail); setFlows(allFlows.filter(flow => flow.steps.some(step => step.device_id === detail.id)));
       setReadings(readingRows.filter(reading => ids.has(reading.component_id)));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load operations.'); }
+      setReadFailed(false);
+    } catch (cause) { setReadFailed(true); setError(cause instanceof Error ? cause.message : 'Could not load operations.'); }
   }, [view]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); const timer = window.setInterval(() => void load(), view.kind === 'device' ? 5000 : 15000); return () => window.clearInterval(timer); }, [load, view.kind]);
 
   async function operate(flow: OperationalFlowDetail, action: 'ON' | 'OFF') {
     const order = action === 'ON' ? flow.steps : [...flow.steps].reverse();
@@ -82,10 +84,10 @@ export default function OperationsHierarchy({sites, canManage, canControl, corpo
     {view.kind === 'device' && device && <div className="device-workspace">
       <div className="device-hero-web"><div><span>DEVICE STATUS</span><h3>{readable(device.status)}</h3><p>{device.model} · {device.serial} · firmware {device.firmware ?? 'unknown'}</p></div><Cpu size={42}/></div>
       <div className="device-columns"><div><div className="section-label"><Power size={18}/><h3>Device operations</h3></div>{flows.length === 0 && <p className="flow-muted">No operational flow includes this device.</p>}
-        {flows.map(flow => {const ready = canControl && flow.online && flow.status === 'PUBLISHED' && flow.steps.every(step => step.feedback_quality === 'CONFIRMED'); return <div className="operation-card-web" key={flow.id}>
+        {flows.map(flow => {const pending = flow.latestRun && ['ACCEPTED','WAITING_FEEDBACK'].includes(flow.latestRun.state); const ready = canControl && !readFailed && !pending && !busy && flow.online && flow.status === 'PUBLISHED' && flow.steps.every(step => step.feedback_quality === 'CONFIRMED'); return <div className="operation-card-web" key={flow.id}>
           <div className="operation-title"><div><strong>{flow.name}</strong><small>{flow.steps.length} ordered steps · {flow.currentState}</small></div><span className="badge">{flow.currentState}</span></div>
           <div className="operation-actions"><button className="primary" disabled={!ready || busy === flow.id} onClick={() => void operate(flow, 'ON')}><Power size={16}/> ON</button><button className="secondary" disabled={!ready || busy === flow.id} onClick={() => void operate(flow, 'OFF')}><X size={16}/> OFF</button></div>
-          {!ready && <p className="operation-warning">Operations require control access, online devices, and confirmed feedback.</p>}
+          {!ready && <p className="operation-warning">{pending ? 'Waiting for device confirmation. A sent request is not a confirmed motor state.' : readFailed ? 'Connection lost. Information may be out of date; controls are disabled.' : 'Operations require control access, online devices, and confirmed feedback.'}</p>}
           {canManage && <div className="order-editor"><span>OPERATION ORDER · OFF runs in reverse</span>{flow.steps.map((step, index) => <div key={step.id}><b>{index + 1}</b><p>{step.component_name}<small>{readable(step.on_action)} · {step.device_name}</small></p><button disabled={index === 0 || busy === flow.id} onClick={() => void arrangeFlow(flow, index, -1)}><ArrowUp size={14}/></button><button disabled={index === flow.steps.length - 1 || busy === flow.id} onClick={() => void arrangeFlow(flow, index, 1)}><ArrowDown size={14}/></button></div>)}</div>}
         </div>})}</div>
         <div><div className="section-label"><GitBranch size={18}/><h3>Component configuration</h3></div><div className="component-table"><div className="component-table-head"><span>Component</span><span>Channel</span><span>State / value</span><span>Arrange</span></div>

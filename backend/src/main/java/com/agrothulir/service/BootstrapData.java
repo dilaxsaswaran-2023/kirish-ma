@@ -68,12 +68,6 @@ public class BootstrapData {
             component(corporation, greenhouse, nursery, "SWITCH", "Grow Lights", "NURSERY-DO2");
             String nurseryHumidity = component(corporation, greenhouse, nursery, "SENSOR", "Nursery Humidity", "NURSERY-AI1");
             arrange(controller, valve, motor, moisture, pressure);
-            reading(corporation, farm, controller, moisture, "41.8", "%");
-            reading(corporation, farm, controller, pressure, "2.4", "bar");
-            reading(corporation, farm, field, fieldTemperature, "29.6", "C");
-            reading(corporation, greenhouse, climate, airTemperature, "27.2", "C");
-            reading(corporation, greenhouse, climate, humidity, "68", "%");
-            reading(corporation, greenhouse, nursery, nurseryHumidity, "74", "%");
             String flow = flow(corporation, farm);
             flowSteps(corporation, farm, flow, valve, motor);
             schedule(corporation, farm, flow);
@@ -156,13 +150,6 @@ public class BootstrapData {
         private void arrange(String device, String... components) {
             for (int index = 0; index < components.length; index++)
                 jdbc.update("UPDATE components SET display_order=? WHERE id=? AND device_id=?", index + 1, components[index], device);
-        }
-
-        private void reading(String corporation, String site, String device, String component, String value, String unit) {
-            if (count("SELECT COUNT(*) FROM sensor_readings WHERE component_id=?", component) > 0) return;
-            jdbc.update("INSERT INTO sensor_readings(id,corporation_id,site_id,device_id,component_id,reading_value,unit,quality,measured_at) " +
-                "VALUES (?,?,?,?,?,?,?,'SEEDED',?)", newId(), corporation, site, device, component, value, unit,
-                Timestamp.from(Instant.now()));
         }
 
         private String flow(String corporation, String site) {

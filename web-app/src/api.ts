@@ -25,7 +25,7 @@ export type OperationalFlowStep = {id: string; step_index: number; component_id:
   kind: string; on_action: string; off_action: string; device_id: string; device_name: string; device_status: string;
   reported_state: string | null; feedback_quality: string};
 export type OperationalFlowDetail = OperationalFlow & {steps: OperationalFlowStep[]; online: boolean;
-  currentState: 'ON' | 'OFF' | 'UNKNOWN'};
+  currentState: 'ON' | 'OFF' | 'UNKNOWN'; latestRun: {id: string; state: string; requested_action: string} | null};
 
 let token = sessionStorage.getItem('kirish-token');
 export function setToken(next: string | null) {
