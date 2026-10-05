@@ -270,7 +270,7 @@
           <article class="node">
             <div class="icon" aria-hidden="true">MQ</div>
             <h3>Device transport boundary</h3>
-            <p>The current device adapter uses authenticated HTTP polling and feedback. MQTT publishing is a future integration point.</p>
+            <p>Web and mobile use the REST backend, never MQTT directly. The backend publishes committed commands through Mosquitto; devices send authenticated telemetry and matching feedback through MQTT. HTTP device ingestion remains available for compatible controllers.</p>
           </article>
         </div>
 
@@ -427,7 +427,7 @@
       </div>
     </section>
 
-    <footer>Source of truth: the current Kirish Spring Boot services and UUID database migrations. This diagram reflects the implemented HTTP device-ingest path; broker publishing remains an integration boundary.</footer>
+    <footer>Source of truth: the current Kirish Spring Boot services and UUID database migrations. MQTT on the VM uses TLS port 8884, per-device credentials and topic access. REST request → database outbox → MQTT command → device feedback → confirmed state. Broker delivery alone does not confirm a motor operation; unconfirmed commands expire after 45 seconds. Only live component measurements are shown; stale devices become offline after 120 seconds.</footer>
   </main>
 
   <script>

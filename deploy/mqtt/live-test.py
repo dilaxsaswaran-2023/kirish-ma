@@ -9,10 +9,48 @@ import json
 from pathlib import Path
 import queue
 import threading
-import time
 import urllib.request
 import uuid
 import paho.mqtt.client as mqtt
+
+def broker_checks(connection, ca):
+    # Separate clients so the retained-message rejection does not interrupt telemetry.
+    rejected = threading.Event()
+    anonymous = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='kirish-anonymous-check-' + uuid.uuid4().hex[:8])
+    anonymous.tls_set(ca_certs=ca)
+    def anonymous_connect(client, userdata, flags, reason, properties):
+        if reason.is_failure:
+            rejected.set()
+    anonymous.on_connect = anonymous_connect
+    anonymous.connect(connection['host'], connection['port'], keepalive=20)
+    anonymous.loop_start()
+    try:
+        assert rejected.wait(10), 'Broker allowed anonymous access or did not respond'
+    finally:
+        anonymous.disconnect()
+        anonymous.loop_stop()
+    print('PASS: anonymous broker access denied')
+
+    ready, disconnected = threading.Event(), threading.Event()
+    retained = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='kirish-retain-check-' + uuid.uuid4().hex[:8])
+    retained.username_pw_set(connection['username'], connection['password'])
+    retained.tls_set(ca_certs=ca)
+    def retained_connect(client, userdata, flags, reason, properties):
+        if not reason.is_failure:
+            ready.set()
+    retained.on_connect = retained_connect
+    retained.on_disconnect = lambda *args: disconnected.set()
+    retained.connect(connection['host'], connection['port'], keepalive=20)
+    retained.loop_start()
+    try:
+        assert ready.wait(10), 'Retained-message probe could not authenticate'
+        # An intentionally invalid envelope cannot change state, even if retention were enabled.
+        retained.publish(connection['topics']['telemetry'], '{}', qos=1, retain=True)
+        assert disconnected.wait(10), 'Broker failed to reject retained publishing'
+    finally:
+        retained.disconnect()
+        retained.loop_stop()
+    print('PASS: broker rejects retained publishing')
 
 def main():
     args = argparse.ArgumentParser()
@@ -21,6 +59,7 @@ def main():
     args.add_argument('--ca', default='kirish-mqtt-ca.crt')
     args = args.parse_args()
     connection = json.loads(Path(args.connection).read_text())
+    broker_checks(connection, args.ca)
     login_password = getpass.getpass('Kirish operator API password: ')
     token = None
     def api(path, method='GET', body=None):

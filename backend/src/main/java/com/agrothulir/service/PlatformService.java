@@ -265,6 +265,10 @@ public class PlatformService {
     @Transactional
     public CommandReceipt command(TenantContext context, String componentId, String idempotencyKey, CommandRequest request) {
         if (!context.canControl()) throw new ApiException(HttpStatus.FORBIDDEN, "CONTROL_FORBIDDEN", "View-only access cannot issue equipment commands.");
+        // The obsolete protected-pump prototype has no MQTT executor. Never accept
+        // an undeliverable command or bypass the sequential flow safety checks.
+        if (mqtt.isEnabled()) throw new ApiException(HttpStatus.CONFLICT, "FLOW_CONTROL_REQUIRED",
+            "Use the device Start/Stop operational flow. Legacy component commands are not supported by the MQTT executor.");
         List<Map<String, Object>> duplicate = maps("SELECT id,run_id,state FROM commands WHERE corporation_id=? AND idempotency_key=?", context.corporationId(), idempotencyKey);
         if (!duplicate.isEmpty()) return receipt(duplicate.get(0));
 

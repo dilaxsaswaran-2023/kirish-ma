@@ -118,6 +118,8 @@ docker compose --env-file .env.production -f compose.prod.yml logs --tail 100 mq
 
 New integrations use the existing REST routes; no MQTT passwords belong in browser or mobile env files. `/v1/devices/{id}/diagnostics` reports the backend broker connection status. A disconnected broker rejects new operations with `MQTT_UNAVAILABLE`. Existing accounts, equipment and real history are preserved. Flyway V5 adds message deduplication; V6 removes only old sensor readings labelled `SEEDED`. A pre-deployment database dump is retained under `/opt/backups`.
 
+Use `/v1/operational-flows/{id}/actions` for motor and valve control, as the current web/mobile device screens do. With MQTT enabled, the unused legacy `/v1/components/{id}/commands` prototype returns `FLOW_CONTROL_REQUIRED` instead of accepting commands that have no executor.
+
 ## Automated live test (no physical hardware)
 
 Install `paho-mqtt==2.1.0` in your Python environment. In a separate terminal, open `ssh -N -L 15030:127.0.0.1:5030 root@45.67.221.203` so API login travels through SSH. Then run `python deploy/mqtt/live-test.py` from the repository and enter the operator API password when prompted. The script refuses to operate any device other than the explicit no-hardware Explorer fixture. It checks TLS, telemetry persistence/deduplication, credential rejection, command ACLs, and ON/OFF feedback confirmation, and leaves the test motor stopped and device offline. Close the SSH tunnel afterward.

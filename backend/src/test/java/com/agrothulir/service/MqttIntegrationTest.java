@@ -64,6 +64,14 @@ class MqttIntegrationTest {
         return mqtt;
     }
 
+    @Test void legacyPrototypeCannotAcceptUndeliverableMqttCommands() {
+        var platform = new PlatformService(jdbc, json, publisher());
+        assertThatThrownBy(() -> platform.command(admin, motorId, UUID.randomUUID().toString(),
+            new PlatformService.CommandRequest("START", 60)))
+            .isInstanceOf(ApiException.class).hasMessageContaining("operational flow");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM commands", Long.class)).isZero();
+    }
+
     @Test void sensorDataIsPersistedOnceAndDeviceBecomesOnline() throws Exception {
         var body = message(sensorId, "VALID"); body.put("value", "28.6"); body.put("unit", "C");
         receive("telemetry", body);
