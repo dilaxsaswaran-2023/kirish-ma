@@ -1,3 +1,6 @@
+# Generated backend build output; built locally and inside Docker.
+/backend/target/
+
 .env.production
 deploy/mqtt/runtime/
 mqtt-connection-private.json
