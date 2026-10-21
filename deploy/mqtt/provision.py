@@ -20,6 +20,7 @@ def command(*args):
     subprocess.run(args, check=True, stdout=subprocess.DEVNULL)
 
 def main():
+    raise SystemExit('Local broker provisioning is retired. Use deploy/mqtt/use-sathurix.py; do not start a VM broker.')
     if Path.cwd().resolve() != ROOT or os.geteuid() != 0:
         raise SystemExit('Run as root from /opt/kirish-ma.')
     os.umask(0o077)

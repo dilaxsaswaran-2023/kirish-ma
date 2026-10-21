@@ -14,6 +14,9 @@ import uuid
 import paho.mqtt.client as mqtt
 
 def broker_checks(connection, ca):
+    if connection.get('brokerAccess') == 'anonymous':
+        print('NOTICE: external broker permits anonymous access; ACL/retention enforcement is not claimed. TLS and data flow are tested below.')
+        return
     # Separate clients so the retained-message rejection does not interrupt telemetry.
     rejected = threading.Event()
     anonymous = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='kirish-anonymous-check-' + uuid.uuid4().hex[:8])
@@ -56,7 +59,7 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument('--api', default='http://127.0.0.1:15030')
     args.add_argument('--connection', default='mqtt-connection-private.json')
-    args.add_argument('--ca', default='kirish-mqtt-ca.crt')
+    args.add_argument('--ca', help='Optional custom CA. By default use the operating system trusted CAs.')
     args = args.parse_args()
     connection = json.loads(Path(args.connection).read_text())
     broker_checks(connection, args.ca)
@@ -80,7 +83,8 @@ def main():
     connected = threading.Event()
     subscribed = threading.Event()
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='kirish-live-test-' + uuid.uuid4().hex[:12], clean_session=True)
-    client.username_pw_set(connection['username'], connection['password'])
+    if connection.get('username'):
+        client.username_pw_set(connection['username'], connection.get('password'))
     client.tls_set(ca_certs=args.ca)
     def on_connect(mqtt_client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:
@@ -133,14 +137,17 @@ def main():
         assert publish('telemetry', expired).get('code') == 'MQTT_MESSAGE_EXPIRED'
         print('PASS: wrong device token and expired telemetry rejected')
 
-        # This account must not be able to impersonate the backend, even for its own test device.
-        client.publish(connection['topics']['commands'], json.dumps({'action': 'DENIED-ACL-PROBE'}), qos=1, retain=False).wait_for_publish(timeout=5)
-        try:
-            commands.get(timeout=2)
-            raise AssertionError('Test account was incorrectly allowed to publish commands')
-        except queue.Empty:
-            pass
-        print('PASS: Explorer account cannot publish backend commands')
+        if connection.get('brokerAccess') == 'anonymous':
+            print('NOTICE: command topic protection is not provided by this anonymous broker. Do not connect physical motors.')
+        else:
+            # Only test ACL denial when the broker is configured to enforce it.
+            client.publish(connection['topics']['commands'], json.dumps({'action': 'DENIED-ACL-PROBE'}), qos=1, retain=False).wait_for_publish(timeout=5)
+            try:
+                commands.get(timeout=2)
+                raise AssertionError('Test account was incorrectly allowed to publish commands')
+            except queue.Empty:
+                pass
+            print('PASS: Explorer account cannot publish backend commands')
 
         for action, command_action, state in [('ON', 'START', 'RUNNING'), ('OFF', 'STOP', 'STOPPED')]:
             run = api('/v1/operational-flows/' + connection['flowId'] + '/actions', 'POST', {'action': action})

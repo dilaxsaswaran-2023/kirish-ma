@@ -8,7 +8,9 @@
 
 The apps do **not** connect directly to MQTT. Commands originate in authenticated REST requests. Broker delivery never means a motor has physically changed: only matching device feedback confirms a step. ON starts the configured sequence; OFF executes it in reverse. Motor components receive `START` / `STOP` and report `RUNNING` / `STOPPED`. Valves use `OPEN` / `CLOSE` and report `OPEN` / `CLOSED`. Relays use `ON` / `OFF`.
 
-An existing VerneMQ installation owns 1883/8883 on this VM. Kirish's separate Mosquitto container exposes **8884** (TLS); its unencrypted 1883 listener is Docker-only. Existing services are unchanged.
+The backend uses the existing **Sathurix** broker at `mqtt.sathurix.com:8883` with TLS and hostname/certificate validation. The separate Kirish Mosquitto container on 8884 is stopped and restart-disabled, and is no longer defined in production Compose. At migration time, the Sathurix hostname resolves to the same VM's existing VerneMQ service; that existing broker must remain running. No broker installation is managed by the backend deployment.
+
+Backend services: `MqttDeviceService` owns the connection/reconnect lifecycle; `MqttSubscriberService` listens for telemetry, feedback and status; `MqttIngestService` validates/stores messages transactionally; `MqttOutboxDispatcher` dispatches committed commands through `MqttPublisherService`. No frontend MQTT connection is needed.
 
 ## MQTT Explorer connection
 
@@ -16,23 +18,25 @@ Use the official [MQTT Explorer desktop client](https://mqtt-explorer.com/).
 
 | Setting | Value |
 | --- | --- |
-| Name | Kirish MQTT Test |
+| Name | Sathurix |
 | Protocol | MQTT over TCP (`mqtt://` with Encryption/TLS enabled; not WebSockets) |
-| Host | `45.67.221.203` |
-| Port | `8884` |
+| Host | `mqtt.sathurix.com` |
+| Port | `8883` |
 | Encryption / TLS | ON |
 | Validate certificate | ON |
-| Username / password | `username` / `password` in the private connection JSON |
-| Advanced → CA certificate | `kirish-mqtt-ca.crt` |
-| Client certificate / private key | Leave empty; this setup uses password authentication over TLS |
-| Client ID | A unique name such as `kirish-explorer-user-1` (never `kirish-backend`) |
+| Username / password | Leave both blank, matching the supplied screenshot |
+| Advanced → CA certificate | Leave empty; use the system's trusted CAs, not the retired Kirish CA |
+| Client certificate / private key | Leave empty |
+| Client ID | A unique name such as `kirish-explorer-user-1` (never `kirish-backend-vm`) |
 | Advanced → subscription | `subscribeTopic` in the private connection JSON; QoS 1 |
 
-The CA is private, not publicly trusted; import the supplied CA rather than disabling certificate verification. See [Mosquitto's TLS and authentication settings](https://mosquitto.org/man/mosquitto-conf-5.html).
+Keep certificate validation ON. The old `kirish-mqtt-ca.crt` is for the retired 8884 listener and must not be used for Sathurix. MQTT Explorer displays `mqtt://` plus its TLS switch; Java Paho requires `ssl://mqtt.sathurix.com:8883`, without a trailing slash.
 
-The server's root-only connection file is `/opt/kirish-ma-private/mqtt-connection-private.json`. The local copy is `D:\apps\kirish-ma\mqtt-connection-private.json`. It contains the broker login, device token, exact topics and component IDs. **Do not commit, screenshot, or share that file.** The public CA file can be shared.
+The server's root-only connection file is `/opt/kirish-ma-private/mqtt-connection-private.json`. The local copy is `D:\apps\kirish-ma\mqtt-connection-private.json`. It contains the device token, exact topics and component IDs. **Do not commit, screenshot, or share that file.**
 
-The account is restricted to the dedicated `MQTT Test Device (no hardware)` in `Kirish Farm → MQTT Test Zone`. It can read its `commands` and `results`; it can publish its `telemetry`, `feedback`, and `status`. It cannot publish commands or access other devices. Do not use existing farm controllers for Explorer emulation.
+Use only the dedicated `MQTT Test Device (no hardware)` in `Kirish Farm → MQTT Test Zone`. Read its `commands` and `results`; publish its `telemetry`, `feedback`, and `status`.
+
+**Security limitation:** the current Sathurix broker permits anonymous publish/subscribe. This configuration does not provide device-specific broker ACLs. Other connected clients may read payloads (including device tokens) or inject command-topic messages. TLS protects transport but does not authorize publishers. Do not connect physical motors until the broker administrator enables credentials and device-scoped ACLs, or the controller protocol gains independent message authentication. Backend per-device token checks remain enabled; they are not a substitute for broker authorization.
 
 ## 1. Publish live state and sensor readings
 
@@ -59,7 +63,7 @@ Copy the printed topic and JSON into MQTT Explorer's Publish panel. Select JSON,
 
 Look under `results` for `stored: true`. The device becomes online and the values appear in its web/mobile device page. These are **manually supplied test measurements**, stored through the real MQTT/database pipeline—not readings from physical sensors.
 
-Messages must be newer than the last component measurement and within 90 seconds of server time (at most 30 seconds ahead). Generate a fresh message every time; replaying the same `messageId` is deduplicated. All samples in a batch commit together. Retained publishing is disabled at the broker: attempting it disconnects the client. Wrong tokens, foreign component IDs and invalid states are rejected by the backend. A single sample can also be sent at the top level instead of `samples`.
+Messages must be newer than the last component measurement and within 90 seconds of server time (at most 30 seconds ahead). Generate a fresh message every time; replaying the same `messageId` is deduplicated. All samples in a batch commit together. Always publish with Retain OFF. The backend rejects messages delivered with the retained flag, but MQTT 3.1.1 does not expose that flag on live forwarding; retention policy belongs to the external broker and is not enforced by this deployment. Wrong tokens, foreign component IDs and invalid states are rejected by the backend. A single sample can also be sent at the top level instead of `samples`.
 
 ## 2. Test motor ON
 
@@ -109,11 +113,12 @@ Real controllers need their own broker account/ACL and per-device token—not th
 
 ## VM operations
 
-Broker configuration: `deploy/mqtt/mosquitto.conf`. Runtime credentials/certs: ignored `deploy/mqtt/runtime/`. Initial provisioning: `python3 deploy/mqtt/provision.py` from `/opt/kirish-ma` as root. Provisioning preserves the existing test login and device token. Do not rotate the device token without updating its client.
+Backend connection settings are in the VM's ignored `.env.production`; see `deploy/mqtt/sathurix.env.example`. `python3 deploy/mqtt/use-sathurix.py`, run as root from `/opt/kirish-ma`, backs up and updates the VM env/private connection file while preserving device IDs and tokens. It does not install or manage a broker. `provision.py` is retired and refuses to run. The old local broker files/volume are retained only for recovery, not mounted by the current deployment.
 
 ```bash
 docker compose --env-file .env.production -f compose.prod.yml ps
-docker compose --env-file .env.production -f compose.prod.yml logs --tail 100 mqtt api
+docker compose --env-file .env.production -f compose.prod.yml logs --tail 100 api
+docker inspect -f '{{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}' kirish-mqtt-1
 ```
 
 New integrations use the existing REST routes; no MQTT passwords belong in browser or mobile env files. `/v1/devices/{id}/diagnostics` reports the backend broker connection status. A disconnected broker rejects new operations with `MQTT_UNAVAILABLE`. Existing accounts, equipment and real history are preserved. Flyway V5 adds message deduplication; V6 removes only old sensor readings labelled `SEEDED`. A pre-deployment database dump is retained under `/opt/backups`.
@@ -122,4 +127,4 @@ Use `/v1/operational-flows/{id}/actions` for motor and valve control, as the cur
 
 ## Automated live test (no physical hardware)
 
-Install `paho-mqtt==2.1.0` in your Python environment. In a separate terminal, open `ssh -N -L 15030:127.0.0.1:5030 root@45.67.221.203` so API login travels through SSH. Then run `python deploy/mqtt/live-test.py` from the repository and enter the operator API password when prompted. The script refuses to operate any device other than the explicit no-hardware Explorer fixture. It checks TLS, telemetry persistence/deduplication, credential rejection, command ACLs, and ON/OFF feedback confirmation, and leaves the test motor stopped and device offline. Close the SSH tunnel afterward.
+Install `paho-mqtt==2.1.0` in your Python environment. In a separate terminal, open `ssh -N -L 15030:127.0.0.1:5030 root@45.67.221.203` so API login travels through SSH. Then run `python deploy/mqtt/live-test.py` from the repository and enter the operator API password when prompted. The script refuses to operate any device other than the explicit no-hardware Explorer fixture. It checks TLS, telemetry persistence/deduplication, invalid device-token rejection, stale payload rejection and ON/OFF feedback confirmation, and leaves the test motor stopped and device offline. For the anonymous broker it reports that ACL and retained-publish restrictions are not provided; it does not claim or test them as enforced. Close the SSH tunnel afterward.

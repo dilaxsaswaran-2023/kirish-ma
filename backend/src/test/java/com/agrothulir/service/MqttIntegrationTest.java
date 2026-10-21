@@ -98,7 +98,7 @@ class MqttIntegrationTest {
         var run = flows.action(admin, flowId, "ON", UUID.randomUUID().toString());
         assertThat(run.get("state")).isEqualTo("WAITING_FEEDBACK");
         MqttDeviceService mqtt = publisher();
-        var dispatcher = new MqttOutboxDispatcher(jdbc, mqtt, json, manager);
+        var dispatcher = new MqttOutboxDispatcher(jdbc, mqtt, new MqttPublisherService(mqtt, json), manager);
         var payload = org.mockito.ArgumentCaptor.forClass(byte[].class);
         dispatcher.dispatch(); dispatcher.dispatch();
         verify(mqtt, times(1)).publishCommand(eq(deviceId), payload.capture());
@@ -119,7 +119,7 @@ class MqttIntegrationTest {
         String flowId = flow(); flows.action(admin, flowId, "ON", UUID.randomUUID().toString());
         MqttDeviceService mqtt = publisher();
         doThrow(new MqttException(MqttException.REASON_CODE_CONNECTION_LOST)).doNothing().when(mqtt).publishCommand(anyString(), any());
-        var dispatcher = new MqttOutboxDispatcher(jdbc, mqtt, json, manager);
+        var dispatcher = new MqttOutboxDispatcher(jdbc, mqtt, new MqttPublisherService(mqtt, json), manager);
         dispatcher.dispatch();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_events WHERE dispatched_at IS NULL", Long.class)).isEqualTo(1);
         dispatcher.dispatch();
@@ -131,7 +131,7 @@ class MqttIntegrationTest {
     @Test void expiredCommandsAndOfflineDevicesAreNotPublished() throws Exception {
         String flowId = flow(); flows.action(admin, flowId, "ON", UUID.randomUUID().toString());
         MqttDeviceService mqtt = publisher();
-        var dispatcher = new MqttOutboxDispatcher(jdbc, mqtt, json, manager);
+        var dispatcher = new MqttOutboxDispatcher(jdbc, mqtt, new MqttPublisherService(mqtt, json), manager);
         jdbc.update("UPDATE devices SET status='OFFLINE' WHERE id=?", deviceId);
         dispatcher.dispatch(); verify(mqtt, never()).publishCommand(anyString(), any());
         jdbc.update("UPDATE devices SET status='ONLINE' WHERE id=?", deviceId);

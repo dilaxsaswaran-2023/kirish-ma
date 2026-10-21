@@ -1,6 +1,5 @@
 package com.agrothulir.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,7 +10,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
@@ -19,11 +17,11 @@ public class MqttOutboxDispatcher {
     private static final Logger log = LoggerFactory.getLogger(MqttOutboxDispatcher.class);
     private final JdbcTemplate jdbc;
     private final MqttDeviceService mqtt;
-    private final ObjectMapper json;
+    private final MqttPublisherService publisher;
     private final TransactionTemplate transactions;
 
-    public MqttOutboxDispatcher(JdbcTemplate jdbc, MqttDeviceService mqtt, ObjectMapper json, PlatformTransactionManager manager) {
-        this.jdbc = jdbc; this.mqtt = mqtt; this.json = json; this.transactions = new TransactionTemplate(manager);
+    public MqttOutboxDispatcher(JdbcTemplate jdbc, MqttDeviceService mqtt, MqttPublisherService publisher, PlatformTransactionManager manager) {
+        this.jdbc = jdbc; this.mqtt = mqtt; this.publisher = publisher; this.transactions = new TransactionTemplate(manager);
     }
 
     @Scheduled(fixedDelay = 1000, initialDelay = 5000)
@@ -47,22 +45,12 @@ public class MqttOutboxDispatcher {
             "AND d.status='ONLINE' AND d.last_seen_at>?", id, Timestamp.from(Instant.now().minusSeconds(120)));
         if (commands.isEmpty()) return;
         Map<String, Object> row = commands.get(0);
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("protocolVersion", 1); payload.put("commandId", row.get("id").toString());
-        payload.put("runId", row.get("run_id").toString()); payload.put("deviceId", row.get("device_id").toString());
-        payload.put("componentId", row.get("component_id").toString()); payload.put("hardwareChannel", row.get("hardware_channel"));
-        payload.put("kind", row.get("kind")); payload.put("action", row.get("action"));
-        payload.put("expectedState", OperationalFlowService.expectedState(row.get("action").toString()));
-        payload.put("issuedAt", instant(row.get("created_at"))); payload.put("expiresAt", instant(row.get("expires_at")));
         jdbc.update("UPDATE outbox_events SET attempts=attempts+1 WHERE id=?", id);
         try {
-            mqtt.publishCommand(row.get("device_id").toString(), json.writeValueAsBytes(payload));
+            publisher.publishCommand(row);
             jdbc.update("UPDATE outbox_events SET dispatched_at=CURRENT_TIMESTAMP WHERE id=?", id);
             log.info("MQTT command published: commandId={}, deviceId={}, action={}", row.get("id"), row.get("device_id"), row.get("action"));
         } catch (Exception failure) { log.warn("MQTT command not acknowledged by broker: commandId={}; retrying until expiry.", row.get("id")); }
     }
 
-    private String instant(Object value) {
-        return value instanceof Timestamp ts ? ts.toInstant().toString() : ((java.time.OffsetDateTime) value).toInstant().toString();
-    }
 }

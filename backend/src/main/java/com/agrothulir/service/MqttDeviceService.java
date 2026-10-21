@@ -1,43 +1,34 @@
 package com.agrothulir.service;
 
 import com.agrothulir.api.ApiException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
-import java.util.Map;
-import java.util.UUID;
 
 /** No retained commands, no offline command buffering, and a committed DB outbox. */
 @Service
 public class MqttDeviceService {
     private static final Logger log = LoggerFactory.getLogger(MqttDeviceService.class);
     private final boolean enabled;
-    private final String brokerUrl, username, password, clientId, prefix;
-    private final ObjectProvider<MqttIngestService> ingest;
-    private final ObjectMapper json;
+    private final String brokerUrl, clientId, prefix;
+    private final ObjectProvider<MqttSubscriberService> subscriber;
+    private final MqttConnectionSettings settings;
     private volatile MqttAsyncClient client;
     private volatile boolean subscribed;
     private volatile boolean subscribing;
     private volatile boolean connecting;
     private volatile boolean closing;
 
-    public MqttDeviceService(@Value("${agrothulir.mqtt.enabled}") boolean enabled,
-        @Value("${agrothulir.mqtt.broker-url}") String brokerUrl, @Value("${agrothulir.mqtt.username}") String username,
-        @Value("${agrothulir.mqtt.password}") String password, @Value("${agrothulir.mqtt.client-id}") String clientId,
-        @Value("${agrothulir.mqtt.topic-prefix}") String prefix, ObjectProvider<MqttIngestService> ingest, ObjectMapper json) {
-        this.enabled = enabled; this.brokerUrl = brokerUrl; this.username = username; this.password = password;
-        this.clientId = clientId; this.prefix = prefix; this.ingest = ingest; this.json = json;
-        if (enabled && (username.isBlank() || password.isBlank())) throw new IllegalArgumentException("MQTT credentials are required when enabled.");
-        if (!prefix.matches("[a-zA-Z0-9_-]+")) throw new IllegalArgumentException("Use a single safe MQTT topic prefix.");
+    public MqttDeviceService(MqttConnectionSettings settings, ObjectProvider<MqttSubscriberService> subscriber) {
+        this.settings = settings; this.subscriber = subscriber;
+        this.enabled = settings.enabled; this.brokerUrl = settings.brokerUrl;
+        this.clientId = settings.clientId; this.prefix = settings.prefix;
     }
 
     public boolean isEnabled() { return enabled; }
@@ -62,9 +53,7 @@ public class MqttDeviceService {
                 @Override public void deliveryComplete(IMqttDeliveryToken token) {}
                 @Override public void messageArrived(String topic, MqttMessage message) { receive(topic, message); }
             });
-            MqttConnectOptions options = new MqttConnectOptions();
-            options.setUserName(username); options.setPassword(password.toCharArray());
-            options.setCleanSession(true); options.setAutomaticReconnect(false); options.setConnectionTimeout(5); options.setKeepAliveInterval(20);
+            MqttConnectOptions options = settings.connectionOptions();
             connecting = true;
             client.connect(options, null, new IMqttActionListener() {
                 @Override public void onSuccess(IMqttToken token) { connecting = false; subscribe(); }
@@ -76,28 +65,25 @@ public class MqttDeviceService {
     private void subscribe() {
         try {
             subscribing = true;
-            client.subscribe(new String[]{prefix + "/devices/+/telemetry", prefix + "/devices/+/feedback", prefix + "/devices/+/status"},
+            client.subscribe(subscriber.getObject().topics(),
                 new int[]{1, 1, 1}, null, new IMqttActionListener() {
-                    @Override public void onSuccess(IMqttToken token) { subscribed = true; subscribing = false; log.info("MQTT connected and subscribed to device telemetry/feedback."); }
+                    @Override public void onSuccess(IMqttToken token) {
+                        int[] granted = token.getGrantedQos();
+                        subscribed = granted != null && granted.length == 3 && java.util.Arrays.stream(granted).allMatch(qos -> qos >= 0 && qos <= 2);
+                        subscribing = false;
+                        if (subscribed) log.info("MQTT connected and subscribed to device telemetry/feedback.");
+                        else log.warn("MQTT broker denied one or more subscriptions; controls remain unavailable.");
+                    }
                     @Override public void onFailure(IMqttToken token, Throwable cause) { subscribed = false; subscribing = false; log.warn("MQTT subscription failed."); }
                 });
         } catch (MqttException failure) { subscribing = false; log.warn("MQTT subscription error code={}", failure.getReasonCode()); }
     }
 
     private void receive(String topic, MqttMessage message) {
-        Map<String, Object> result;
-        try { result = ingest.getObject().receive(topic, message.getPayload(), message.isRetained()); }
-        catch (Exception failure) {
-            // Never log the raw payload: it contains a per-device token.
-            String code = failure instanceof ApiException api ? api.code() : "MQTT_INVALID_MESSAGE";
-            log.warn("MQTT message rejected: topic={}, code={}", topic, code);
-            result = Map.of("stored", false, "code", code);
-        }
-        String[] parts = topic.split("/");
-        if (parts.length != 4) return;
+        MqttSubscriberService.Reply reply = subscriber.getObject().receive(topic, message);
+        if (reply == null) return;
         try {
-            UUID.fromString(parts[2]);
-            client.publish(prefix + "/devices/" + parts[2] + "/results", json.writeValueAsBytes(result), 1, false);
+            client.publish(reply.topic(), reply.payload(), 1, false);
         } catch (Exception failure) { log.warn("MQTT result delivery failed."); }
     }
 
